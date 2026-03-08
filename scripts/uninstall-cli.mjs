@@ -8,16 +8,7 @@ const commands = [
         "uninstall",
         "-g",
         "haptic-streo",
-        "@haptic/cli",
-        "@haptic/core",
-        "@haptic/runtime",
-      "@haptic/plugin-system",
-      "@haptic/transpiler",
-      "@haptic/parser",
-      "@haptic/ast",
-      "@haptic/utils",
-      "@haptic/ai",
-    ],
+      ],
   ],
 ];
 

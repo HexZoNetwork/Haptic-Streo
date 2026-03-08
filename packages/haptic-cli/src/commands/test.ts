@@ -1,9 +1,11 @@
-﻿import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import type { Command } from "commander";
 import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions/index.js";
+import { HapticCliError } from "../errors.js";
 import {
   compileToRuntimeCache,
+  ensureEntryExists,
   loadEnvironmentVariables,
   loadProjectConfig,
   resolveEntryPath,
@@ -45,24 +47,35 @@ export function registerTestCommand(program: Command): void {
         loadEnvironmentVariables(botConfig, botLoaded.projectRoot);
         const missingBot = ["BOT_TOKEN"].filter((key) => !process.env[key]);
         if (missingBot.length > 0) {
-          throw new Error(`Missing bot env vars: ${missingBot.join(", ")}`);
+          throw new HapticCliError({
+            code: "HPTCLI_TEST_BOT_ENV_MISSING",
+            message: `Missing bot env vars: ${missingBot.join(", ")}`,
+          });
         }
 
         const botEntry = resolveEntryPath(opts.botEntry, botConfig, botLoaded.projectRoot);
+        ensureEntryExists(botEntry);
         const runtime = await compileToRuntimeCache(botEntry, botConfig, botLoaded.projectRoot);
 
-        const botProc = startBotProcess(runtime.runtimeFile, opts.verbose);
+        const { proc: botProc, ready: botReady } = startBotProcess(runtime.runtimeFile, opts.verbose);
 
         try {
+          await botReady;
           await sleep(bootMs);
           if (botProc.exitCode !== null) {
-            throw new Error(`Bot runtime exited early with code ${botProc.exitCode}`);
+            throw new HapticCliError({
+              code: "HPTCLI_TEST_RUNTIME_EXITED",
+              message: `Bot runtime exited early with code ${botProc.exitCode}`,
+            });
           }
 
           loadEnvironmentVariables(userConfig, userLoaded.projectRoot);
           const missingUser = ["API_ID", "API_HASH", "STRING_SESSION"].filter((key) => !process.env[key]);
           if (missingUser.length > 0) {
-            throw new Error(`Missing user env vars: ${missingUser.join(", ")}`);
+            throw new HapticCliError({
+              code: "HPTCLI_TEST_USER_ENV_MISSING",
+              message: `Missing user env vars: ${missingUser.join(", ")}`,
+            });
           }
 
           const apiId = Number(process.env.API_ID);
@@ -100,7 +113,10 @@ export function registerTestCommand(program: Command): void {
             }
 
             if (!reply) {
-              throw new Error(`No bot reply captured within ${timeoutMs}ms`);
+              throw new HapticCliError({
+                code: "HPTCLI_TEST_REPLY_TIMEOUT",
+                message: `No bot reply captured within ${timeoutMs}ms`,
+              });
             }
 
             process.stdout.write(
@@ -126,9 +142,45 @@ export function registerTestCommand(program: Command): void {
     );
 }
 
-function startBotProcess(runtimeFile: string, verbose: boolean): ChildProcess {
+function startBotProcess(runtimeFile: string, verbose: boolean): { proc: ChildProcess; ready: Promise<void> } {
   const proc = spawn(process.execPath, [runtimeFile], {
     stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  const ready = new Promise<void>((resolve, reject) => {
+    let settled = false;
+
+    proc.once("spawn", () => {
+      settled = true;
+      resolve();
+    });
+
+    proc.once("error", (error) => {
+      settled = true;
+      reject(
+        new HapticCliError({
+          code: "HPTCLI_TEST_RUNTIME_START_FAILED",
+          message: `Failed to start bot runtime: ${runtimeFile}`,
+          cause: error,
+        }),
+      );
+    });
+
+    proc.once("exit", (code, signal) => {
+      if (settled) {
+        return;
+      }
+
+      reject(
+        new HapticCliError({
+          code: "HPTCLI_TEST_RUNTIME_EXITED",
+          message:
+            code !== null
+              ? `Bot runtime exited before startup completed with code ${code}`
+              : `Bot runtime exited before startup completed via signal ${signal ?? "unknown"}`,
+        }),
+      );
+    });
   });
 
   if (verbose) {
@@ -136,7 +188,7 @@ function startBotProcess(runtimeFile: string, verbose: boolean): ChildProcess {
     proc.stderr?.on("data", (chunk) => process.stderr.write(`[bot-err] ${chunk}`));
   }
 
-  return proc;
+  return { proc, ready };
 }
 
 function stopBotProcess(proc: ChildProcess): void {
@@ -148,4 +200,3 @@ function stopBotProcess(proc: ChildProcess): void {
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
-

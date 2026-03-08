@@ -1,6 +1,11 @@
-﻿import path from "node:path";
+import path from "node:path";
 import { ensureDir, writeTextFile } from "@haptic/utils";
 import type { Command } from "commander";
+import {
+  createProjectPackageJson,
+  normalizeProjectType,
+  provisionLocalCliBinary,
+} from "./scaffold-shared.js";
 
 export function registerNewCommand(program: Command): void {
   program
@@ -12,12 +17,14 @@ export function registerNewCommand(program: Command): void {
       const root = path.resolve(process.cwd(), name);
       await ensureDir(root);
 
-      const isUserbot = type === "userbot";
+      const projectType = normalizeProjectType(type);
+      const isUserbot = projectType === "userbot";
       const source = isUserbot
         ? `userbot "MyUserbot":\n api_id = env("API_ID")\n api_hash = env("API_HASH")\nend\n\ncommand ping:\n reply "pong"\nend\n\non message match /hello/i:\n reply "hi there"\nend\n`
         : `bot "MyBot":\n token = env("BOT_TOKEN")\nend\n\nfunc greet(name):\n return "hello " + name\nend\n\ncommand start:\n let sample = [user.username]\n for item in sample:\n  log item\n end\n reply await greet(user.username)\nend\n\non message match /ping/i:\n reply "pong"\n console.log("js inline tetap jalan")\nend\n`;
       const engine = isUserbot ? "gramjs" : "telegraf";
 
+      provisionLocalCliBinary(root);
       await writeTextFile(path.join(root, "bot.haptic"), source);
       await writeTextFile(
         path.join(root, "config.hpconf"),
@@ -31,7 +38,7 @@ export function registerNewCommand(program: Command): void {
       );
       await writeTextFile(
         path.join(root, "package.json"),
-        '{\n  "name": "my-haptic-project",\n  "private": true,\n  "type": "module",\n  "scripts": {\n    "dev": "haptic dev",\n    "build": "haptic build",\n    "run": "haptic run",\n    "doctor": "haptic doctor",\n    "benchmark": "haptic benchmark"\n  }\n}\n',
+        `${JSON.stringify(createProjectPackageJson(name, engine), null, 2)}\n`,
       );
 
       process.stdout.write(`Created: ${root}\n`);

@@ -1,0 +1,707 @@
+const SAFE_MAX_FACTORIAL = 170;
+const MATRIX_MAX_SIZE = 8;
+
+const SCIENTIFIC_CONSTANTS = {
+  pi: Math.PI,
+  e: Math.E,
+  tau: Math.PI * 2,
+  phi: (1 + Math.sqrt(5)) / 2,
+};
+
+const SCIENTIFIC_FUNCTIONS = {
+  sin: (x) => Math.sin(x),
+  cos: (x) => Math.cos(x),
+  tan: (x) => Math.tan(x),
+  asin: (x) => Math.asin(x),
+  acos: (x) => Math.acos(x),
+  atan: (x) => Math.atan(x),
+  sqrt: (x) => Math.sqrt(x),
+  abs: (x) => Math.abs(x),
+  ln: (x) => Math.log(x),
+  log: (x) => Math.log10(x),
+  exp: (x) => Math.exp(x),
+  floor: (x) => Math.floor(x),
+  ceil: (x) => Math.ceil(x),
+  round: (x) => Math.round(x),
+  min: (...xs) => Math.min(...xs),
+  max: (...xs) => Math.max(...xs),
+  avg: (...xs) => xs.reduce((a, b) => a + b, 0) / xs.length,
+  ncr: (n, r) => combination(n, r),
+  npr: (n, r) => permutation(n, r),
+};
+
+function getCommandPayload(text, commandName) {
+  const escaped = commandName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp("^/" + escaped + "(?:@[A-Za-z0-9_]+)?(?:\\s+|$)", "i");
+  if (!pattern.test(text.trim())) {
+    return "";
+  }
+
+  return text.trim().replace(pattern, "").trim();
+}
+
+function toFiniteNumber(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) {
+    throw new Error("Invalid number: " + String(value));
+  }
+  return n;
+}
+
+function formatAnyNumber(value) {
+  if (!Number.isFinite(value)) {
+    return String(value);
+  }
+  if (Number.isInteger(value)) {
+    return String(value);
+  }
+  return Number(value.toFixed(12)).toString();
+}
+
+function factorial(n) {
+  if (!Number.isInteger(n) || n < 0) {
+    throw new Error("Factorial requires non-negative integer");
+  }
+  if (n > SAFE_MAX_FACTORIAL) {
+    throw new Error("Factorial too large (>170)");
+  }
+
+  let result = 1;
+  for (let i = 2; i <= n; i += 1) {
+    result *= i;
+  }
+  return result;
+}
+
+function permutation(n, r) {
+  if (!Number.isInteger(n) || !Number.isInteger(r) || n < 0 || r < 0 || r > n) {
+    throw new Error("npr requires integers with 0 <= r <= n");
+  }
+  let result = 1;
+  for (let i = 0; i < r; i += 1) {
+    result *= (n - i);
+  }
+  return result;
+}
+
+function combination(n, r) {
+  if (!Number.isInteger(n) || !Number.isInteger(r) || n < 0 || r < 0 || r > n) {
+    throw new Error("ncr requires integers with 0 <= r <= n");
+  }
+  const k = Math.min(r, n - r);
+  let numerator = 1;
+  let denominator = 1;
+  for (let i = 1; i <= k; i += 1) {
+    numerator *= (n - (k - i));
+    denominator *= i;
+  }
+  return numerator / denominator;
+}
+
+function tokenizeMathExpression(input) {
+  const source = input.replace(/\s+/g, "");
+  const tokens = [];
+  let i = 0;
+
+  while (i < source.length) {
+    const char = source[i];
+
+    if (/\d/.test(char) || (char === "." && /\d/.test(source[i + 1] ?? ""))) {
+      let j = i + 1;
+      while (j < source.length && /[\d.]/.test(source[j])) {
+        j += 1;
+      }
+      const raw = source.slice(i, j);
+      const parsed = Number(raw);
+      if (!Number.isFinite(parsed)) {
+        throw new Error("Invalid numeric literal: " + raw);
+      }
+      tokens.push({ kind: "number", value: parsed });
+      i = j;
+      continue;
+    }
+
+    if (/[A-Za-z_]/.test(char)) {
+      let j = i + 1;
+      while (j < source.length && /[A-Za-z0-9_]/.test(source[j])) {
+        j += 1;
+      }
+      tokens.push({ kind: "identifier", value: source.slice(i, j).toLowerCase() });
+      i = j;
+      continue;
+    }
+
+    if ("+-*/%^!".includes(char)) {
+      tokens.push({ kind: "operator", value: char });
+      i += 1;
+      continue;
+    }
+
+    if (char === "(") {
+      tokens.push({ kind: "lparen" });
+      i += 1;
+      continue;
+    }
+
+    if (char === ")") {
+      tokens.push({ kind: "rparen" });
+      i += 1;
+      continue;
+    }
+
+    if (char === ",") {
+      tokens.push({ kind: "comma" });
+      i += 1;
+      continue;
+    }
+
+    throw new Error("Unexpected character: " + char);
+  }
+
+  tokens.push({ kind: "eof" });
+  return tokens;
+}
+
+function evaluateMathExpression(input) {
+  const tokens = tokenizeMathExpression(input);
+  let cursor = 0;
+
+  function peek() {
+    return tokens[cursor];
+  }
+
+  function consume() {
+    const current = tokens[cursor];
+    cursor += 1;
+    return current;
+  }
+
+  function expect(kind) {
+    const token = consume();
+    if (!token || token.kind !== kind) {
+      throw new Error("Expected token kind: " + kind);
+    }
+    return token;
+  }
+
+  function parseExpression() {
+    return parseAddSub();
+  }
+
+  function parseAddSub() {
+    let left = parseMulDiv();
+    while (true) {
+      const token = peek();
+      if (token.kind === "operator" && (token.value === "+" || token.value === "-")) {
+        consume();
+        const right = parseMulDiv();
+        left = token.value === "+" ? left + right : left - right;
+        continue;
+      }
+      break;
+    }
+    return left;
+  }
+
+  function parseMulDiv() {
+    let left = parsePower();
+    while (true) {
+      const token = peek();
+      if (token.kind === "operator" && (token.value === "*" || token.value === "/" || token.value === "%")) {
+        consume();
+        const right = parsePower();
+        if (token.value === "*") left *= right;
+        if (token.value === "/") left /= right;
+        if (token.value === "%") left %= right;
+        continue;
+      }
+      break;
+    }
+    return left;
+  }
+
+  function parsePower() {
+    let left = parseUnary();
+    const token = peek();
+    if (token.kind === "operator" && token.value === "^") {
+      consume();
+      const right = parsePower();
+      left = left ** right;
+    }
+    return left;
+  }
+
+  function parseUnary() {
+    const token = peek();
+    if (token.kind === "operator" && token.value === "+") {
+      consume();
+      return parseUnary();
+    }
+    if (token.kind === "operator" && token.value === "-") {
+      consume();
+      return -parseUnary();
+    }
+    return parsePostfix();
+  }
+
+  function parsePostfix() {
+    let value = parsePrimary();
+    while (true) {
+      const token = peek();
+      if (token.kind === "operator" && token.value === "!") {
+        consume();
+        value = factorial(value);
+        continue;
+      }
+      break;
+    }
+    return value;
+  }
+
+  function parsePrimary() {
+    const token = peek();
+
+    if (token.kind === "number") {
+      consume();
+      return token.value;
+    }
+
+    if (token.kind === "identifier") {
+      consume();
+      const maybeLParen = peek();
+
+      if (maybeLParen.kind === "lparen") {
+        consume();
+        const args = [];
+        if (peek().kind !== "rparen") {
+          args.push(parseExpression());
+          while (peek().kind === "comma") {
+            consume();
+            args.push(parseExpression());
+          }
+        }
+        expect("rparen");
+
+        const fn = SCIENTIFIC_FUNCTIONS[token.value];
+        if (!fn) {
+          throw new Error("Unknown function: " + token.value);
+        }
+        if (args.length === 0 && (token.value === "min" || token.value === "max" || token.value === "avg")) {
+          throw new Error(token.value + "() requires at least one value");
+        }
+        return toFiniteNumber(fn(...args));
+      }
+
+      if (!(token.value in SCIENTIFIC_CONSTANTS)) {
+        throw new Error("Unknown symbol: " + token.value);
+      }
+      return SCIENTIFIC_CONSTANTS[token.value];
+    }
+
+    if (token.kind === "lparen") {
+      consume();
+      const inside = parseExpression();
+      expect("rparen");
+      return inside;
+    }
+
+    throw new Error("Unexpected token while parsing");
+  }
+
+  const result = parseExpression();
+  if (peek().kind !== "eof") {
+    throw new Error("Unexpected token after expression");
+  }
+  return toFiniteNumber(result);
+}
+
+function toMatrix(value) {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error("Matrix must be non-empty array");
+  }
+  const width = Array.isArray(value[0]) ? value[0].length : -1;
+  if (width <= 0) {
+    throw new Error("Matrix rows must be non-empty arrays");
+  }
+  if (value.length > MATRIX_MAX_SIZE || width > MATRIX_MAX_SIZE) {
+    throw new Error("Matrix too large (max " + MATRIX_MAX_SIZE + "x" + MATRIX_MAX_SIZE + ")");
+  }
+
+  return value.map((row, idx) => {
+    if (!Array.isArray(row) || row.length !== width) {
+      throw new Error("Invalid row shape at index " + idx);
+    }
+    return row.map((item) => toFiniteNumber(item));
+  });
+}
+
+function cloneMatrix(matrix) {
+  return matrix.map((row) => row.slice());
+}
+
+function identityMatrix(n) {
+  const out = [];
+  for (let r = 0; r < n; r += 1) {
+    const row = [];
+    for (let c = 0; c < n; c += 1) {
+      row.push(r === c ? 1 : 0);
+    }
+    out.push(row);
+  }
+  return out;
+}
+
+function transposeMatrix(matrix) {
+  const rows = matrix.length;
+  const cols = matrix[0].length;
+  const out = [];
+  for (let c = 0; c < cols; c += 1) {
+    const row = [];
+    for (let r = 0; r < rows; r += 1) {
+      row.push(matrix[r][c]);
+    }
+    out.push(row);
+  }
+  return out;
+}
+
+function determinant(matrix) {
+  if (matrix.length !== matrix[0].length) {
+    throw new Error("Determinant requires square matrix");
+  }
+
+  const n = matrix.length;
+  const a = cloneMatrix(matrix);
+  let sign = 1;
+  let det = 1;
+
+  for (let col = 0; col < n; col += 1) {
+    let pivot = col;
+    for (let row = col + 1; row < n; row += 1) {
+      if (Math.abs(a[row][col]) > Math.abs(a[pivot][col])) {
+        pivot = row;
+      }
+    }
+
+    if (Math.abs(a[pivot][col]) < 1e-12) {
+      return 0;
+    }
+
+    if (pivot !== col) {
+      const tmp = a[col];
+      a[col] = a[pivot];
+      a[pivot] = tmp;
+      sign *= -1;
+    }
+
+    const pivotVal = a[col][col];
+    det *= pivotVal;
+
+    for (let row = col + 1; row < n; row += 1) {
+      const factor = a[row][col] / pivotVal;
+      for (let k = col; k < n; k += 1) {
+        a[row][k] -= factor * a[col][k];
+      }
+    }
+  }
+
+  return det * sign;
+}
+
+function inverseMatrix(matrix) {
+  if (matrix.length !== matrix[0].length) {
+    throw new Error("Inverse requires square matrix");
+  }
+
+  const n = matrix.length;
+  const left = cloneMatrix(matrix);
+  const right = identityMatrix(n);
+
+  for (let col = 0; col < n; col += 1) {
+    let pivot = col;
+    for (let row = col + 1; row < n; row += 1) {
+      if (Math.abs(left[row][col]) > Math.abs(left[pivot][col])) {
+        pivot = row;
+      }
+    }
+
+    if (Math.abs(left[pivot][col]) < 1e-12) {
+      throw new Error("Matrix is singular and cannot be inverted");
+    }
+
+    if (pivot !== col) {
+      const tmpL = left[col];
+      left[col] = left[pivot];
+      left[pivot] = tmpL;
+
+      const tmpR = right[col];
+      right[col] = right[pivot];
+      right[pivot] = tmpR;
+    }
+
+    const pivotVal = left[col][col];
+    for (let k = 0; k < n; k += 1) {
+      left[col][k] /= pivotVal;
+      right[col][k] /= pivotVal;
+    }
+
+    for (let row = 0; row < n; row += 1) {
+      if (row === col) continue;
+      const factor = left[row][col];
+      for (let k = 0; k < n; k += 1) {
+        left[row][k] -= factor * left[col][k];
+        right[row][k] -= factor * right[col][k];
+      }
+    }
+  }
+
+  return right;
+}
+
+function multiplyMatrix(a, b) {
+  if (a[0].length !== b.length) {
+    throw new Error("mul requires A.cols == B.rows");
+  }
+
+  const rows = a.length;
+  const cols = b[0].length;
+  const inner = b.length;
+  const out = [];
+
+  for (let r = 0; r < rows; r += 1) {
+    const row = [];
+    for (let c = 0; c < cols; c += 1) {
+      let sum = 0;
+      for (let k = 0; k < inner; k += 1) {
+        sum += a[r][k] * b[k][c];
+      }
+      row.push(sum);
+    }
+    out.push(row);
+  }
+
+  return out;
+}
+
+function addOrSubMatrix(a, b, sign) {
+  if (a.length !== b.length || a[0].length !== b[0].length) {
+    throw new Error("add/sub requires same matrix dimensions");
+  }
+
+  return a.map((row, r) => row.map((value, c) => value + sign * b[r][c]));
+}
+
+function matrixPower(a, exponent) {
+  if (a.length !== a[0].length) {
+    throw new Error("pow requires square matrix");
+  }
+  if (!Number.isInteger(exponent) || exponent < 0) {
+    throw new Error("pow exponent must be non-negative integer");
+  }
+
+  let result = identityMatrix(a.length);
+  let base = cloneMatrix(a);
+  let exp = exponent;
+  while (exp > 0) {
+    if (exp % 2 === 1) {
+      result = multiplyMatrix(result, base);
+    }
+    base = multiplyMatrix(base, base);
+    exp = Math.floor(exp / 2);
+  }
+  return result;
+}
+
+function extractJsonArrays(input) {
+  const parts = [];
+  let depth = 0;
+  let start = -1;
+
+  for (let i = 0; i < input.length; i += 1) {
+    const ch = input[i];
+    if (ch === "[") {
+      if (depth === 0) start = i;
+      depth += 1;
+      continue;
+    }
+    if (ch === "]") {
+      depth -= 1;
+      if (depth < 0) throw new Error("Unbalanced brackets in matrix payload");
+      if (depth === 0 && start >= 0) {
+        parts.push(input.slice(start, i + 1));
+        start = -1;
+      }
+    }
+  }
+
+  if (depth !== 0) {
+    throw new Error("Unbalanced brackets in matrix payload");
+  }
+
+  return parts;
+}
+
+function formatMatrix(matrix) {
+  return matrix
+    .map((row) => row.map((value) => formatAnyNumber(value)).join("\t"))
+    .join("\n");
+}
+
+function runMatrixOperation(payload) {
+  const [rawOp, ...rest] = payload.trim().split(/\s+/);
+  const op = (rawOp || "").toLowerCase();
+  const remainder = rest.join(" ");
+  if (!op) {
+    throw new Error("Missing operation. Use det|inv|transpose|mul|add|sub|pow");
+  }
+
+  const arrays = extractJsonArrays(remainder);
+  const parsedArrays = arrays.map((raw) => toMatrix(JSON.parse(raw)));
+
+  if (op === "det") {
+    if (parsedArrays.length !== 1) throw new Error("det requires one matrix");
+    return "det = " + formatAnyNumber(determinant(parsedArrays[0]));
+  }
+  if (op === "inv") {
+    if (parsedArrays.length !== 1) throw new Error("inv requires one matrix");
+    return "inverse:\n" + formatMatrix(inverseMatrix(parsedArrays[0]));
+  }
+  if (op === "transpose") {
+    if (parsedArrays.length !== 1) throw new Error("transpose requires one matrix");
+    return "transpose:\n" + formatMatrix(transposeMatrix(parsedArrays[0]));
+  }
+  if (op === "mul") {
+    if (parsedArrays.length !== 2) throw new Error("mul requires two matrices");
+    return "A*B:\n" + formatMatrix(multiplyMatrix(parsedArrays[0], parsedArrays[1]));
+  }
+  if (op === "add") {
+    if (parsedArrays.length !== 2) throw new Error("add requires two matrices");
+    return "A+B:\n" + formatMatrix(addOrSubMatrix(parsedArrays[0], parsedArrays[1], 1));
+  }
+  if (op === "sub") {
+    if (parsedArrays.length !== 2) throw new Error("sub requires two matrices");
+    return "A-B:\n" + formatMatrix(addOrSubMatrix(parsedArrays[0], parsedArrays[1], -1));
+  }
+  if (op === "pow") {
+    if (parsedArrays.length !== 1) throw new Error("pow requires one matrix");
+    const intMatch = remainder.replace(arrays[0], "").trim().match(/^-?\d+$/);
+    if (!intMatch) throw new Error("pow requires integer exponent after matrix");
+    const exp = Number(intMatch[0]);
+    return "A^" + exp + ":\n" + formatMatrix(matrixPower(parsedArrays[0], exp));
+  }
+
+  throw new Error("Unknown matrix op: " + op);
+}
+
+function parseTranslateInput(payload) {
+  const compact = payload.trim();
+  if (!compact) {
+    throw new Error("Missing translate payload");
+  }
+
+  const arrow = compact.match(/^([a-z]{2,8})\s*(?:>|->)\s*([a-z]{2,8})\s+([\s\S]+)$/i);
+  if (arrow) {
+    return {
+      from: arrow[1].toLowerCase(),
+      to: arrow[2].toLowerCase(),
+      text: arrow[3].trim(),
+    };
+  }
+
+  const firstSpace = compact.indexOf(" ");
+  if (firstSpace <= 0) {
+    throw new Error("Use format: /translate <to> <text> OR <from>-><to> <text>");
+  }
+
+  return {
+    from: "auto",
+    to: compact.slice(0, firstSpace).toLowerCase(),
+    text: compact.slice(firstSpace + 1).trim(),
+  };
+}
+
+async function googleTranslateText(text, to, from = "auto") {
+  const params = new URLSearchParams({
+    client: "gtx",
+    sl: from,
+    tl: to,
+    dt: "t",
+    q: text,
+  });
+
+  const url = "https://translate.googleapis.com/translate_a/single?" + params.toString();
+  const response = await fetch(url, { method: "GET" });
+  if (!response.ok) {
+    throw new Error("Translate HTTP error: " + response.status);
+  }
+
+  const data = await response.json();
+  const translated = Array.isArray(data?.[0])
+    ? data[0].map((segment) => (Array.isArray(segment) ? segment[0] : "")).join("")
+    : "";
+
+  if (!translated) {
+    throw new Error("Translate failed: empty output");
+  }
+
+  return {
+    translated,
+    detectedSource: String(data?.[2] ?? from),
+    target: to,
+  };
+}
+
+bot "StreoTestMathTranslate":
+ token = env("BOT_TOKEN")
+end
+
+command start:
+ reply "StreoTest online. Commands: /math, /matrix, /translate"
+end
+
+command math:
+ let payload = getCommandPayload(message.text, "math")
+ if payload == "":
+  reply "Usage: /math <expression> | Example: /math ncr(10,3)+sqrt(81)-5!"
+  stop
+ end
+
+ try:
+  let result = evaluateMathExpression(payload)
+  reply "Result: " + formatAnyNumber(result)
+ catch err:
+  reply "Math error: " + err.message
+ end
+end
+
+command matrix:
+ let payload = getCommandPayload(message.text, "matrix")
+ if payload == "":
+  reply "Usage: /matrix <op> <matrix..>. Ops: det inv transpose mul add sub pow"
+  stop
+ end
+
+ try:
+  let out = runMatrixOperation(payload)
+  reply out
+ catch err:
+  reply "Matrix error: " + err.message
+ end
+end
+
+command translate:
+ let payload = getCommandPayload(message.text, "translate")
+ if payload == "":
+  reply "Usage: /translate <to> <text> OR /translate <from>-><to> <text>"
+  stop
+ end
+
+ try:
+  let parsed = parseTranslateInput(payload)
+  let result = await googleTranslateText(parsed.text, parsed.to, parsed.from)
+  reply "Translated (" + result.detectedSource + "->" + result.target + "): " + result.translated
+ catch err:
+  reply "Translate error: " + err.message
+ end
+end
+

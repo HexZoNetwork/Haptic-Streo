@@ -1,6 +1,7 @@
-﻿import type { ProgramNode } from "@haptic/ast";
+import type { ProgramNode } from "@haptic/ast";
 import { runHook, type PluginRegistry } from "@haptic/plugin-system";
 import type { ResolvedCompilerConfig } from "../config/compiler-config.js";
+import { ensureCompilerError } from "../errors.js";
 import { lexStage } from "../stages/lex-stage.js";
 import { generateStage } from "../stages/generate-stage.js";
 import { parseStage } from "../stages/parse-stage.js";
@@ -17,22 +18,75 @@ export async function runPipeline(
   config: ResolvedCompilerConfig,
   registry: PluginRegistry,
 ): Promise<PipelineOutput> {
-  await runHook(registry, "beforeParse", { source });
+  try {
+    await runHook(registry, "beforeParse", { source });
+  } catch (error) {
+    throw ensureCompilerError(error, {
+      code: "HPTC_PLUGIN_HOOK_FAILED",
+      message: "Plugin hook failed beforeParse",
+      stage: "beforeParse",
+    });
+  }
 
   lexStage(source);
 
   const parsed = parseStage(source);
-  await runHook(registry, "afterParse", { ast: parsed });
+
+  try {
+    await runHook(registry, "afterParse", { ast: parsed });
+  } catch (error) {
+    throw ensureCompilerError(error, {
+      code: "HPTC_PLUGIN_HOOK_FAILED",
+      message: "Plugin hook failed afterParse",
+      stage: "afterParse",
+    });
+  }
 
   const semanticAst = semanticStage(parsed);
-  await runHook(registry, "beforeTransform", { ast: semanticAst });
+
+  try {
+    await runHook(registry, "beforeTransform", { ast: semanticAst });
+  } catch (error) {
+    throw ensureCompilerError(error, {
+      code: "HPTC_PLUGIN_HOOK_FAILED",
+      message: "Plugin hook failed beforeTransform",
+      stage: "beforeTransform",
+    });
+  }
 
   const transformed = transformStage(semanticAst);
-  await runHook(registry, "afterTransform", { ast: transformed });
 
-  await runHook(registry, "beforeGenerate", { ast: transformed });
+  try {
+    await runHook(registry, "afterTransform", { ast: transformed });
+  } catch (error) {
+    throw ensureCompilerError(error, {
+      code: "HPTC_PLUGIN_HOOK_FAILED",
+      message: "Plugin hook failed afterTransform",
+      stage: "afterTransform",
+    });
+  }
+
+  try {
+    await runHook(registry, "beforeGenerate", { ast: transformed });
+  } catch (error) {
+    throw ensureCompilerError(error, {
+      code: "HPTC_PLUGIN_HOOK_FAILED",
+      message: "Plugin hook failed beforeGenerate",
+      stage: "beforeGenerate",
+    });
+  }
+
   const output = generateStage(transformed, config.engine);
-  await runHook(registry, "afterGenerate", { ast: transformed, output });
+
+  try {
+    await runHook(registry, "afterGenerate", { ast: transformed, output });
+  } catch (error) {
+    throw ensureCompilerError(error, {
+      code: "HPTC_PLUGIN_HOOK_FAILED",
+      message: "Plugin hook failed afterGenerate",
+      stage: "afterGenerate",
+    });
+  }
 
   return { ast: transformed, output };
 }

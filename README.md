@@ -10,8 +10,10 @@ Untuk user publik:
 2. `haptic --help`
 3. `haptic new bot mybot`
 4. `cd mybot`
-5. `haptic wizard`
-6. `haptic bot.haptic`
+5. `npm run build`
+6. `node dist/bot.mjs`
+
+Project hasil `new` dan `wizard` otomatis membawa binary lokal ke `.haptic/bin/haptic.cjs`, jadi script `npm run build|run|dev|doctor` tidak bergantung pada global install.
 
 Direct run didukung:
 
@@ -22,12 +24,24 @@ Alternatif tanpa global install:
 1. `npm i -D haptic-streo`
 2. `npx haptic --help`
 
-Install via GitHub Release (tanpa publish ke npmjs):
+## Scaffold Flow
 
-1. Upload `release/tarballs/haptic-streo-0.1.0.tgz` ke GitHub Release (tag misal `v0.1.0`)
-2. User install langsung:
-   `npm i -g https://github.com/<owner>/<repo>/releases/download/v0.1.0/haptic-streo-0.1.0.tgz`
-3. Jalankan: `haptic --help`
+Scaffold bot baru:
+
+1. `haptic new bot mybot`
+2. `cd mybot`
+3. Isi `.env.testing`
+4. `npm install`
+5. `npm run doctor`
+6. `npm run run`
+
+Setup project existing via wizard:
+
+1. `haptic wizard`
+2. Review `config.hpconf`
+3. Review `.env.<profile>` dan `.env.<profile>.example`
+4. `npm install`
+5. `npm run build`
 
 ## Syntax Support
 
@@ -62,29 +76,21 @@ profile = "testing"
 cacheDir = ".hpcache"
 ```
 
+## Testing
+
+Regression test lokal:
+
+1. `npm test`
+
+Coverage saat ini:
+
+- scaffold `new` menghasilkan project self-contained
+- `wizard` menulis script lokal `.haptic/bin/haptic.cjs`
+- invalid input scaffold fail-fast
+- parser tidak salah hitung brace dari komentar JS di dalam block DSL
+
 ## Security Notes
 
 - Jangan commit credential asli ke repo.
 - Pakai `.env.testing.example` untuk template.
 - `.env*` di-ignore dari git dan npm package.
-
-## Maintainer Release
-
-Tarball build:
-
-1. `npm run pack:tarballs`
-2. Output: `release/tarballs/*.tgz`
-
-Publish check:
-
-1. `npm run publish:dry-run`
-
-Publish all:
-
-1. `npm login`
-2. `npm run publish:packages`
-
-Local installer test:
-
-1. `npm run install:cli`
-2. `npm run uninstall:cli`

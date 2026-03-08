@@ -1,11 +1,12 @@
-﻿import fs from "node:fs";
+import fs from "node:fs";
 import type { Command } from "commander";
 import {
   compileToRuntimeCache,
+  ensureEntryExists,
+  ensureRuntimeEnv,
   loadEnvironmentVariables,
   loadProjectConfig,
   resolveEntryPath,
-  validateRuntimeEnv,
 } from "./shared.js";
 
 export function registerDoctorCommand(program: Command): void {
@@ -20,7 +21,6 @@ export function registerDoctorCommand(program: Command): void {
       const entry = resolveEntryPath(opts.entry, config, loaded.projectRoot);
 
       const envResult = loadEnvironmentVariables(config, loaded.projectRoot);
-      const missing = validateRuntimeEnv(config);
 
       process.stdout.write(`Config: ${loaded.configPath ?? "(default)"}\n`);
       process.stdout.write(`Entry: ${entry}\n`);
@@ -29,13 +29,8 @@ export function registerDoctorCommand(program: Command): void {
         `Env files: ${envResult.loadedPaths.length > 0 ? envResult.loadedPaths.join(", ") : "none"}\n`,
       );
 
-      if (!fs.existsSync(entry)) {
-        throw new Error(`Entry file not found: ${entry}`);
-      }
-
-      if (missing.length > 0) {
-        throw new Error(`Missing required env vars: ${missing.join(", ")}`);
-      }
+      ensureEntryExists(entry);
+      ensureRuntimeEnv(config);
 
       const runtime = await compileToRuntimeCache(entry, config, loaded.projectRoot);
       process.stdout.write(`Compile: OK (jit:${runtime.codeHash})\n`);
@@ -43,4 +38,3 @@ export function registerDoctorCommand(program: Command): void {
       process.stdout.write("Doctor: healthy\n");
     });
 }
-

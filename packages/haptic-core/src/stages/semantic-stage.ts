@@ -1,4 +1,5 @@
-﻿import type { ProgramNode } from "@haptic/ast";
+import type { ProgramNode } from "@haptic/ast";
+import { HapticCompilerError } from "../errors.js";
 
 export function semanticStage(ast: ProgramNode): ProgramNode {
   const seenCommands = new Set<string>();
@@ -15,14 +16,22 @@ export function semanticStage(ast: ProgramNode): ProgramNode {
     if (node.kind !== "Command") {
       if (node.kind === "Function") {
         if (seenFunctions.has(node.name)) {
-          throw new Error(`Duplicate function name: ${node.name}`);
+          throw new HapticCompilerError({
+            code: "HPTC_SEMANTIC_DUPLICATE_FUNCTION",
+            message: `Duplicate function name: ${node.name}`,
+            stage: "semantic",
+          });
         }
         seenFunctions.add(node.name);
       }
 
       if (node.kind === "Db") {
         if (seenTables.has(node.name)) {
-          throw new Error(`Duplicate db table name: ${node.name}`);
+          throw new HapticCompilerError({
+            code: "HPTC_SEMANTIC_DUPLICATE_DB",
+            message: `Duplicate db table name: ${node.name}`,
+            stage: "semantic",
+          });
         }
         seenTables.add(node.name);
       }
@@ -31,14 +40,22 @@ export function semanticStage(ast: ProgramNode): ProgramNode {
     }
 
     if (seenCommands.has(node.name)) {
-      throw new Error(`Duplicate command name: ${node.name}`);
+      throw new HapticCompilerError({
+        code: "HPTC_SEMANTIC_DUPLICATE_COMMAND",
+        message: `Duplicate command name: ${node.name}`,
+        stage: "semantic",
+      });
     }
 
     seenCommands.add(node.name);
   }
 
   if (botDeclarations > 1) {
-    throw new Error("Only one bot/userbot declaration is allowed.");
+    throw new HapticCompilerError({
+      code: "HPTC_SEMANTIC_DUPLICATE_BOT",
+      message: "Only one bot/userbot declaration is allowed.",
+      stage: "semantic",
+    });
   }
 
   return ast;

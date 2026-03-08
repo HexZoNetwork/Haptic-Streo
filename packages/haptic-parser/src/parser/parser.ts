@@ -1,4 +1,4 @@
-﻿import {
+import {
   createBotNode,
   createCommandNode,
   createConditionNode,
@@ -39,6 +39,12 @@ interface CollectedBlock {
   lines: string[];
   nextIndex: number;
   startLine: number;
+}
+
+interface BraceScannerState {
+  inQuote: "'" | '"' | "`" | null;
+  escaped: boolean;
+  inBlockComment: boolean;
 }
 
 export function parseDsl(source: string): ParseResult {
@@ -241,7 +247,6 @@ function parseStatements(
       continue;
     }
 
-    // Keep unknown lines as raw JS so mixed syntax runs without parse failure.
     statements.push(createRawJsNode(stripTrailingSemicolon(rawLine)));
     idx += 1;
   }
@@ -331,7 +336,6 @@ function parseStatementBlock(
     return block.nextIndex;
   }
 
-  // Unknown block inside statements: pass through as raw JS block.
   const asRaw = `${header} {\n${block.lines.join("\n")}\n}`;
   out.push(createRawJsNode(asRaw));
   return block.nextIndex;
@@ -410,12 +414,13 @@ function collectBraceBlock(
 
   const header = startLine.slice(0, -1).trim();
   const blockLines: string[] = [];
+  const scanner = createBraceScanner();
   let depth = 1;
   let i = startIndex + 1;
 
   while (i < lines.length && depth > 0) {
     const current = lines[i];
-    depth += braceDelta(current);
+    depth += scanner(current);
 
     if (depth > 0) {
       blockLines.push(current);
@@ -532,48 +537,74 @@ function stripTrailingSemicolon(value: string): string {
   return value.replace(/;$/, "").trim();
 }
 
-function braceDelta(line: string): number {
-  let delta = 0;
-  let inQuote: "'" | '"' | "`" | null = null;
-  let escaped = false;
+function createBraceScanner(): (line: string) => number {
+  const state: BraceScannerState = {
+    inQuote: null,
+    escaped: false,
+    inBlockComment: false,
+  };
 
-  for (let i = 0; i < line.length; i += 1) {
-    const ch = line[i];
+  return (line: string): number => {
+    let delta = 0;
 
-    if (inQuote) {
-      if (escaped) {
-        escaped = false;
+    for (let i = 0; i < line.length; i += 1) {
+      const ch = line[i];
+      const next = line[i + 1];
+
+      if (state.inBlockComment) {
+        if (ch === "*" && next === "/") {
+          state.inBlockComment = false;
+          i += 1;
+        }
         continue;
       }
 
-      if (ch === "\\") {
-        escaped = true;
+      if (state.inQuote) {
+        if (state.escaped) {
+          state.escaped = false;
+          continue;
+        }
+
+        if (ch === "\\") {
+          state.escaped = true;
+          continue;
+        }
+
+        if (ch === state.inQuote) {
+          state.inQuote = null;
+        }
+
         continue;
       }
 
-      if (ch === inQuote) {
-        inQuote = null;
+      if (ch === "/" && next === "/") {
+        break;
       }
 
-      continue;
+      if (ch === "/" && next === "*") {
+        state.inBlockComment = true;
+        i += 1;
+        continue;
+      }
+
+      if (ch === '"' || ch === "'" || ch === "`") {
+        state.inQuote = ch;
+        state.escaped = false;
+        continue;
+      }
+
+      if (ch === "{") {
+        delta += 1;
+        continue;
+      }
+
+      if (ch === "}") {
+        delta -= 1;
+      }
     }
 
-    if (ch === '"' || ch === "'" || ch === "`") {
-      inQuote = ch;
-      continue;
-    }
-
-    if (ch === "{") {
-      delta += 1;
-      continue;
-    }
-
-    if (ch === "}") {
-      delta -= 1;
-    }
-  }
-
-  return delta;
+    return delta;
+  };
 }
 
 function error(code: string, message: string, line?: number): ParserDiagnostic {

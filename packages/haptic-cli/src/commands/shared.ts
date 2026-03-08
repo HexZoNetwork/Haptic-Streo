@@ -1,10 +1,11 @@
-﻿import fs from "node:fs";
+import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import dotenv from "dotenv";
 import { HapticCompiler, type CompilerConfig } from "@haptic/core";
 import { ensureDir, readTextFile, writeTextFile } from "@haptic/utils";
+import { HapticCliError } from "../errors.js";
 
 export interface CliProjectConfig extends CompilerConfig {
   entry?: string;
@@ -35,6 +36,13 @@ export async function loadProjectConfig(
 ): Promise<LoadedProjectConfig> {
   if (explicitConfigPath) {
     const resolved = path.resolve(cwd, explicitConfigPath);
+    if (!fs.existsSync(resolved)) {
+      throw new HapticCliError({
+        code: "HPTCLI_CONFIG_NOT_FOUND",
+        message: `Config file not found: ${resolved}`,
+      });
+    }
+
     const loaded = await loadConfigByPath(resolved);
     return {
       config: loaded,
@@ -44,19 +52,19 @@ export async function loadProjectConfig(
   }
 
   const hpconfPath = path.resolve(cwd, "config.hpconf");
-  const hpconfConfig = await tryLoadConfigByPath(hpconfPath);
+  const hpconfConfig = await loadOptionalConfigByPath(hpconfPath);
   if (hpconfConfig) {
     return { config: hpconfConfig, configPath: hpconfPath, projectRoot: path.dirname(hpconfPath) };
   }
 
   const hptcfPath = path.resolve(cwd, "hptcf.json");
-  const hptcfConfig = await tryLoadConfigByPath(hptcfPath);
+  const hptcfConfig = await loadOptionalConfigByPath(hptcfPath);
   if (hptcfConfig) {
     return { config: hptcfConfig, configPath: hptcfPath, projectRoot: path.dirname(hptcfPath) };
   }
 
   const legacyPath = path.resolve(cwd, "haptic.config.js");
-  const legacyConfig = await tryLoadConfigByPath(legacyPath);
+  const legacyConfig = await loadOptionalConfigByPath(legacyPath);
   if (legacyConfig) {
     return { config: legacyConfig, configPath: legacyPath, projectRoot: path.dirname(legacyPath) };
   }
@@ -66,6 +74,16 @@ export async function loadProjectConfig(
 
 export function resolveEntryPath(entry: string | undefined, config: CliProjectConfig, cwd = process.cwd()): string {
   return path.resolve(cwd, entry ?? config.entry ?? "bot.haptic");
+}
+
+export function ensureEntryExists(entryPath: string): void {
+  if (!fs.existsSync(entryPath)) {
+    throw new HapticCliError({
+      code: "HPTCLI_ENTRY_NOT_FOUND",
+      message: `Entry file not found: ${entryPath}`,
+      details: ["Pass --entry <path> or set entry in config.hpconf"],
+    });
+  }
 }
 
 export function resolveCacheDir(config: CliProjectConfig, cwd = process.cwd()): string {
@@ -124,6 +142,22 @@ export function validateRuntimeEnv(config: CliProjectConfig): string[] {
   return ["BOT_TOKEN"].filter((key) => !process.env[key]);
 }
 
+export function ensureRuntimeEnv(config: CliProjectConfig): void {
+  const missing = validateRuntimeEnv(config);
+  if (missing.length === 0) {
+    return;
+  }
+
+  throw new HapticCliError({
+    code: "HPTCLI_ENV_MISSING",
+    message: `Missing required env vars: ${missing.join(", ")}`,
+    details: [
+      `Engine: ${config.engine ?? "telegraf"}`,
+      "Configure credentials in .env, .env.<profile>, or config-selected envFile",
+    ],
+  });
+}
+
 export async function upsertEnvVariable(
   envFilePath: string,
   key: string,
@@ -161,43 +195,59 @@ export async function compileToRuntimeCache(
   config: CliProjectConfig,
   cwd = process.cwd(),
 ): Promise<RuntimeCompileResult> {
-  const source = await readTextFile(entryFile);
-  const compiler = new HapticCompiler(config);
-  const code = await compiler.compileSource(source);
+  try {
+    const source = await readTextFile(entryFile);
+    const compiler = new HapticCompiler(config);
+    const code = await compiler.compileSource(source);
 
-  const codeHash = createHash("sha256").update(entryFile).update("\n").update(code).digest("hex").slice(0, 12);
-  const cacheDir = resolveCacheDir(config, cwd);
-  const runtimeDir = path.join(cacheDir, "runtime");
-  await ensureDir(runtimeDir);
+    const codeHash = createHash("sha256").update(entryFile).update("\n").update(code).digest("hex").slice(0, 12);
+    const cacheDir = resolveCacheDir(config, cwd);
+    const runtimeDir = path.join(cacheDir, "runtime");
+    await ensureDir(runtimeDir);
 
-  const baseName = path.basename(entryFile, path.extname(entryFile));
-  const runtimeFile = path.join(runtimeDir, `${baseName}-${codeHash}.mjs`);
-  await writeTextFile(runtimeFile, code);
+    const baseName = path.basename(entryFile, path.extname(entryFile));
+    const runtimeFile = path.join(runtimeDir, `${baseName}-${codeHash}.mjs`);
+    await writeTextFile(runtimeFile, code);
 
-  return { runtimeFile, codeHash };
+    return { runtimeFile, codeHash };
+  } catch (error) {
+    throw new HapticCliError({
+      code: "HPTCLI_COMPILE_FAILED",
+      message: `Failed to compile runtime from ${entryFile}`,
+      cause: error,
+    });
+  }
 }
 
 async function loadConfigByPath(absolutePath: string): Promise<CliProjectConfig> {
-  if (absolutePath.endsWith(".json")) {
-    const raw = await readTextFile(absolutePath);
-    return JSON.parse(raw) as CliProjectConfig;
-  }
+  try {
+    if (absolutePath.endsWith(".json")) {
+      const raw = await readTextFile(absolutePath);
+      return parseJsonWithLocation(raw) as CliProjectConfig;
+    }
 
-  if (absolutePath.endsWith(".hpconf")) {
-    const raw = await readTextFile(absolutePath);
-    return parseHpconf(raw);
-  }
+    if (absolutePath.endsWith(".hpconf")) {
+      const raw = await readTextFile(absolutePath);
+      return parseHpconf(raw);
+    }
 
-  const mod = await import(pathToFileURL(absolutePath).href);
-  return (mod.default ?? mod) as CliProjectConfig;
+    const mod = await import(pathToFileURL(absolutePath).href);
+    return (mod.default ?? mod) as CliProjectConfig;
+  } catch (error) {
+    throw new HapticCliError({
+      code: "HPTCLI_CONFIG_INVALID",
+      message: `Failed to load config: ${absolutePath}`,
+      cause: error,
+    });
+  }
 }
 
-async function tryLoadConfigByPath(absolutePath: string): Promise<CliProjectConfig | undefined> {
-  try {
-    return await loadConfigByPath(absolutePath);
-  } catch {
+async function loadOptionalConfigByPath(absolutePath: string): Promise<CliProjectConfig | undefined> {
+  if (!fs.existsSync(absolutePath)) {
     return undefined;
   }
+
+  return loadConfigByPath(absolutePath);
 }
 
 function parseHpconf(raw: string): CliProjectConfig {
@@ -207,7 +257,7 @@ function parseHpconf(raw: string): CliProjectConfig {
   }
 
   if (trimmed.startsWith("{")) {
-    return JSON.parse(trimmed) as CliProjectConfig;
+    return parseJsonWithLocation(trimmed) as CliProjectConfig;
   }
 
   const config: Record<string, unknown> = {};
@@ -252,7 +302,7 @@ function parseHpconfScalar(value: string): unknown {
   }
   if ((normalized.startsWith("[") && normalized.endsWith("]")) || (normalized.startsWith("{") && normalized.endsWith("}"))) {
     try {
-      return JSON.parse(normalized);
+      return parseJsonWithLocation(normalized);
     } catch {
       return normalized;
     }
@@ -273,4 +323,38 @@ function stripWrappingQuotes(value: string): string {
   }
 
   return value;
+}
+
+function parseJsonWithLocation(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw enrichJsonSyntaxError(error, raw);
+    }
+
+    throw error;
+  }
+}
+
+function enrichJsonSyntaxError(error: SyntaxError, raw: string): SyntaxError {
+  if (/\(line \d+ column \d+\)$/.test(error.message)) {
+    return error;
+  }
+
+  const positionMatch = error.message.match(/\bposition (\d+)\b/);
+  if (!positionMatch) {
+    return error;
+  }
+
+  const offset = Number.parseInt(positionMatch[1], 10);
+  if (!Number.isFinite(offset) || offset < 0) {
+    return error;
+  }
+
+  const prefix = raw.slice(0, Math.min(offset, raw.length));
+  const lines = prefix.split(/\r?\n/);
+  const line = Math.max(1, lines.length);
+  const column = (lines.at(-1)?.length ?? 0) + 1;
+  return new SyntaxError(`${error.message} (line ${line} column ${column})`);
 }

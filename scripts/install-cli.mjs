@@ -5,24 +5,21 @@ import process from "node:process";
 
 const repoRoot = process.cwd();
 const tarballDir = path.join(repoRoot, "release", "tarballs");
-const installOrder = [
-  "@haptic/ast",
-  "@haptic/utils",
-  "@haptic/parser",
-  "@haptic/transpiler",
-  "@haptic/plugin-system",
-  "@haptic/runtime",
-  "@haptic/core",
-  "@haptic/ai",
-  "@haptic/cli",
-  "haptic-streo",
-];
+const installOrder = ["haptic-streo"];
 
 run("npm", ["install"], { skipWhen: () => fs.existsSync(path.join(repoRoot, "node_modules")) });
 run("npm", ["run", "pack:tarballs"]);
 const tarballs = resolveTarballs(tarballDir, installOrder);
 run("npm", ["install", "-g", ...tarballs]);
-run("node", [path.join(repoRoot, "packages", "haptic-cli", "dist", "cli.js"), "--version"]);
+
+const globalNodeModules = capture("npm", ["root", "-g"]);
+const installedBin = path.join(globalNodeModules, "haptic-streo", "bin", "haptic.cjs");
+if (!fs.existsSync(installedBin)) {
+  process.stderr.write(`Installed CLI binary not found: ${installedBin}\n`);
+  process.exit(1);
+}
+
+run("node", [installedBin, "--version"]);
 
 process.stdout.write("Haptic CLI install step completed. Use: haptic --help (restart terminal if PATH is stale)\n");
 
@@ -42,6 +39,33 @@ function run(command, args, options = {}) {
   if (result.status !== 0) {
     process.exit(result.status ?? 1);
   }
+}
+
+function capture(command, args) {
+  process.stdout.write(`run: ${command} ${args.join(" ")}\n`);
+  const result = spawnSync(command, args, {
+    cwd: repoRoot,
+    encoding: "utf8",
+    shell: true,
+  });
+
+  if (result.status !== 0) {
+    if (result.stdout) {
+      process.stdout.write(result.stdout);
+    }
+    if (result.stderr) {
+      process.stderr.write(result.stderr);
+    }
+    process.exit(result.status ?? 1);
+  }
+
+  const stdout = result.stdout?.trim();
+  if (!stdout) {
+    process.stderr.write(`No output from command: ${command} ${args.join(" ")}\n`);
+    process.exit(1);
+  }
+
+  return stdout;
 }
 
 function resolveTarballs(directory, packageNames) {
@@ -65,5 +89,6 @@ function resolveTarballs(directory, packageNames) {
 }
 
 function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return value.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&");
 }
+

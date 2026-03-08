@@ -1,9 +1,9 @@
-﻿import fs from "node:fs";
 import { performance } from "node:perf_hooks";
 import { HapticCompiler } from "@haptic/core";
 import { readTextFile } from "@haptic/utils";
 import type { Command } from "commander";
-import { loadEnvironmentVariables, loadProjectConfig, resolveEntryPath } from "./shared.js";
+import { HapticCliError } from "../errors.js";
+import { ensureEntryExists, loadEnvironmentVariables, loadProjectConfig, resolveEntryPath } from "./shared.js";
 
 export function registerBenchmarkCommand(program: Command): void {
   program
@@ -18,14 +18,21 @@ export function registerBenchmarkCommand(program: Command): void {
       loadEnvironmentVariables(config, loaded.projectRoot);
 
       const entry = resolveEntryPath(opts.entry, config, loaded.projectRoot);
-      if (!fs.existsSync(entry)) {
-        throw new Error(`Entry file not found: ${entry}`);
-      }
+      ensureEntryExists(entry);
 
       const source = await readTextFile(entry);
       const compiler = new HapticCompiler(config);
 
-      const iterations = Math.max(1, Number.parseInt(opts.iterations, 10) || 50);
+      const parsedIterations = Number.parseInt(opts.iterations, 10);
+      if (!Number.isFinite(parsedIterations) || parsedIterations <= 0) {
+        throw new HapticCliError({
+          code: "HPTCLI_BENCHMARK_ITERATIONS_INVALID",
+          message: `Invalid iteration count: ${opts.iterations}`,
+          details: ["Pass a positive integer to --iterations"],
+        });
+      }
+
+      const iterations = parsedIterations;
       const timings: number[] = [];
 
       await compiler.compileSource(source);
@@ -58,4 +65,3 @@ function percentile(values: number[], ratio: number): number {
   const idx = Math.min(values.length - 1, Math.max(0, Math.floor(values.length * ratio)));
   return values[idx];
 }
-

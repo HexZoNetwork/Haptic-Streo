@@ -1,14 +1,21 @@
-﻿import fs from "node:fs";
+import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { createInterface } from "node:readline/promises";
 import process from "node:process";
 import { ensureDir, writeTextFile } from "@haptic/utils";
 import type { Command } from "commander";
+import {
+  createProjectPackageJson,
+  dependencyForEngine,
+  type HapticEngine,
+  normalizeEngine,
+  provisionLocalCliBinary,
+} from "./scaffold-shared.js";
 
 interface WizardOptions {
   yes?: boolean;
-  engine?: "telegraf" | "gramjs";
+  engine?: HapticEngine;
   entry?: string;
   profile?: string;
   skipInstall?: boolean;
@@ -48,6 +55,7 @@ export function registerWizardCommand(program: Command): void {
           plugins: [],
         };
 
+        provisionLocalCliBinary(process.cwd());
         await writeTextFile(configPath, `${JSON.stringify(config, null, 2)}\n`);
 
         if (!fs.existsSync(envPath)) {
@@ -67,9 +75,9 @@ export function registerWizardCommand(program: Command): void {
         await upsertPackageJson(engine);
 
         if (!opts.skipInstall) {
-          const deps = engine === "gramjs" ? ["telegram"] : ["telegraf"];
-          process.stdout.write(`Installing deps: ${deps.join(", ")}\n`);
-          const install = spawnSync("npm", ["install", ...deps], {
+          const engineDependency = dependencyForEngine(engine);
+          process.stdout.write(`Installing project dependencies for ${engineDependency.packageName}\n`);
+          const install = spawnSync("npm", ["install"], {
             cwd: process.cwd(),
             stdio: "inherit",
             shell: true,
@@ -87,7 +95,7 @@ export function registerWizardCommand(program: Command): void {
     });
 }
 
-function defaultHapticTemplate(engine: "telegraf" | "gramjs"): string {
+function defaultHapticTemplate(engine: HapticEngine): string {
   if (engine === "gramjs") {
     return `userbot "MyUserbot":\n api_id = env("API_ID")\n api_hash = env("API_HASH")\nend\n\ncommand ping:\n reply "pong"\nend\n`;
   }
@@ -95,7 +103,7 @@ function defaultHapticTemplate(engine: "telegraf" | "gramjs"): string {
   return `bot "MyBot":\n token = env("BOT_TOKEN")\nend\n\ncommand start:\n reply "hello " + user.username\nend\n`;
 }
 
-async function upsertPackageJson(engine: "telegraf" | "gramjs"): Promise<void> {
+async function upsertPackageJson(engine: HapticEngine): Promise<void> {
   const packagePath = path.resolve(process.cwd(), "package.json");
   const hasPackage = fs.existsSync(packagePath);
 
@@ -103,22 +111,21 @@ async function upsertPackageJson(engine: "telegraf" | "gramjs"): Promise<void> {
     ? (JSON.parse(fs.readFileSync(packagePath, "utf8")) as Record<string, unknown>)
     : ({ name: path.basename(process.cwd()) || "haptic-project", private: true, type: "module" } as Record<string, unknown>);
 
-  const scripts = (base.scripts as Record<string, string> | undefined) ?? {};
-  scripts.dev = scripts.dev ?? "haptic dev";
-  scripts.build = scripts.build ?? "haptic build";
-  scripts.run = scripts.run ?? "haptic run";
-  scripts.doctor = scripts.doctor ?? "haptic doctor";
-  scripts.benchmark = scripts.benchmark ?? "haptic benchmark";
+  const packageName = typeof base.name === "string" && base.name.trim() !== ""
+    ? base.name
+    : (path.basename(process.cwd()) || "haptic-project");
+  const template = createProjectPackageJson(packageName, engine);
 
-  base.scripts = scripts;
-
-  const deps = (base.dependencies as Record<string, string> | undefined) ?? {};
-  if (engine === "gramjs") {
-    deps.telegram = deps.telegram ?? "^2.26.22";
-  } else {
-    deps.telegraf = deps.telegraf ?? "^4.16.3";
-  }
-  base.dependencies = deps;
+  base.private = base.private ?? true;
+  base.type = base.type ?? "module";
+  base.scripts = {
+    ...(template.scripts as Record<string, string>),
+    ...((base.scripts as Record<string, string> | undefined) ?? {}),
+  };
+  base.dependencies = {
+    ...(template.dependencies as Record<string, string>),
+    ...((base.dependencies as Record<string, string> | undefined) ?? {}),
+  };
 
   await writeTextFile(packagePath, `${JSON.stringify(base, null, 2)}\n`);
 }
@@ -126,13 +133,13 @@ async function upsertPackageJson(engine: "telegraf" | "gramjs"): Promise<void> {
 async function resolveEngine(
   rl: ReturnType<typeof createInterface>,
   opts: WizardOptions,
-): Promise<"telegraf" | "gramjs"> {
-  if (opts.engine === "telegraf" || opts.engine === "gramjs") {
-    return opts.engine;
+): Promise<HapticEngine> {
+  if (typeof opts.engine === "string") {
+    return normalizeEngine(opts.engine);
   }
 
   const answer = await ask(rl, "Engine (telegraf/gramjs)", "telegraf", opts.yes);
-  return answer === "gramjs" ? "gramjs" : "telegraf";
+  return normalizeEngine(answer);
 }
 
 async function ask(

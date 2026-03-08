@@ -1,0 +1,9 @@
+{
+  "entry": "bot.haptic",
+  "engine": "telegraf",
+  "outDir": "dist",
+  "cacheDir": ".hpcache",
+  "runtimeMode": "jit",
+  "profile": "testing",
+  "plugins": []
+}

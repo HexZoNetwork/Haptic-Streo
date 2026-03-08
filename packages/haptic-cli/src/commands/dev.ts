@@ -1,16 +1,18 @@
-﻿import fs from "node:fs";
+import fs from "node:fs";
 import path from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 import chokidar from "chokidar";
 import { ensureDir } from "@haptic/utils";
 import type { Command } from "commander";
+import { formatCliError, HapticCliError } from "../errors.js";
 import {
   compileToRuntimeCache,
+  ensureEntryExists,
+  ensureRuntimeEnv,
   loadEnvironmentVariables,
   loadProjectConfig,
   resolveCacheDir,
   resolveEntryPath,
-  validateRuntimeEnv,
 } from "./shared.js";
 
 export function registerDevCommand(program: Command): void {
@@ -25,6 +27,7 @@ export function registerDevCommand(program: Command): void {
       const loaded = await loadProjectConfig(opts.config);
       const config = loaded.config;
       const entry = resolveEntryPath(opts.entry, config, loaded.projectRoot);
+      ensureEntryExists(entry);
       let proc: ChildProcess | undefined;
 
       const cacheDir = resolveCacheDir(config, loaded.projectRoot);
@@ -41,10 +44,7 @@ export function registerDevCommand(program: Command): void {
 
       const rebuild = async () => {
         const envLoaded = loadEnvironmentVariables(config, loaded.projectRoot);
-        const missing = validateRuntimeEnv(config);
-        if (missing.length > 0) {
-          throw new Error(`Missing required env vars: ${missing.join(", ")}. Configure in .env / config.hpconf profile.`);
-        }
+        ensureRuntimeEnv(config);
 
         const runtime = await compileToRuntimeCache(entry, config, loaded.projectRoot);
         process.stdout.write(`Runtime updated (jit:${runtime.codeHash})\n`);
@@ -58,11 +58,26 @@ export function registerDevCommand(program: Command): void {
 
         if (!opts.monitor) {
           proc = spawn(process.execPath, [runtime.runtimeFile], { stdio: "inherit" });
+          proc.on("error", (error) => {
+            process.stderr.write(formatCliError(new HapticCliError({
+              code: "HPTCLI_RUNTIME_START_FAILED",
+              message: `Failed to start runtime: ${runtime.runtimeFile}`,
+              cause: error,
+            })));
+          });
           return;
         }
 
         proc = spawn(process.execPath, [runtime.runtimeFile], {
           stdio: ["inherit", "pipe", "pipe"],
+        });
+
+        proc.on("error", (error) => {
+          process.stderr.write(formatCliError(new HapticCliError({
+            code: "HPTCLI_RUNTIME_START_FAILED",
+            message: `Failed to start runtime: ${runtime.runtimeFile}`,
+            cause: error,
+          })));
         });
 
         proc.stdout?.on("data", (chunk) => {
@@ -95,7 +110,7 @@ export function registerDevCommand(program: Command): void {
         try {
           await rebuild();
         } catch (error) {
-          process.stderr.write(`${String(error)}\n`);
+          process.stderr.write(formatCliError(error));
         }
       });
 
@@ -109,4 +124,3 @@ export function registerDevCommand(program: Command): void {
       process.on("SIGTERM", shutdown);
     });
 }
-

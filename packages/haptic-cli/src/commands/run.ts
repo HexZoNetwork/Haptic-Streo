@@ -1,15 +1,17 @@
-﻿import fs from "node:fs";
+import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { ensureDir } from "@haptic/utils";
 import type { Command } from "commander";
+import { formatCliError, HapticCliError } from "../errors.js";
 import {
   compileToRuntimeCache,
+  ensureEntryExists,
+  ensureRuntimeEnv,
   loadEnvironmentVariables,
   loadProjectConfig,
   resolveCacheDir,
   resolveEntryPath,
-  validateRuntimeEnv,
 } from "./shared.js";
 
 export function registerRunCommand(program: Command): void {
@@ -24,12 +26,10 @@ export function registerRunCommand(program: Command): void {
       const loaded = await loadProjectConfig(opts.config);
       const config = loaded.config;
       const entry = resolveEntryPath(opts.entry, config, loaded.projectRoot);
+      ensureEntryExists(entry);
 
       const envLoaded = loadEnvironmentVariables(config, loaded.projectRoot);
-      const missing = validateRuntimeEnv(config);
-      if (missing.length > 0) {
-        throw new Error(`Missing required env vars: ${missing.join(", ")}. Configure in .env / config.hpconf profile.`);
-      }
+      ensureRuntimeEnv(config);
 
       const runtime = await compileToRuntimeCache(entry, config, loaded.projectRoot);
       process.stdout.write(`Runtime prepared (jit:${runtime.codeHash})\n`);
@@ -39,6 +39,14 @@ export function registerRunCommand(program: Command): void {
 
       if (!opts.monitor) {
         const child = spawn(process.execPath, [runtime.runtimeFile], { stdio: "inherit" });
+        child.on("error", (error) => {
+          process.stderr.write(formatCliError(new HapticCliError({
+            code: "HPTCLI_RUNTIME_START_FAILED",
+            message: `Failed to start runtime: ${runtime.runtimeFile}`,
+            cause: error,
+          })));
+          process.exit(1);
+        });
         child.on("exit", (code) => process.exit(code ?? 0));
         return;
       }
@@ -57,6 +65,16 @@ export function registerRunCommand(program: Command): void {
         stdio: ["inherit", "pipe", "pipe"],
       });
 
+      child.on("error", (error) => {
+        stream.end();
+        process.stderr.write(formatCliError(new HapticCliError({
+          code: "HPTCLI_RUNTIME_START_FAILED",
+          message: `Failed to start runtime: ${runtime.runtimeFile}`,
+          cause: error,
+        })));
+        process.exit(1);
+      });
+
       child.stdout?.on("data", (chunk) => {
         process.stdout.write(chunk);
         stream.write(chunk);
@@ -73,4 +91,3 @@ export function registerRunCommand(program: Command): void {
       });
     });
 }
-

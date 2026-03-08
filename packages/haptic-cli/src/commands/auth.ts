@@ -1,14 +1,15 @@
-﻿import { createInterface } from "node:readline/promises";
+import { createInterface } from "node:readline/promises";
 import process from "node:process";
 import type { Command } from "commander";
 import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions/index.js";
+import { HapticCliError } from "../errors.js";
 import {
+  ensureRuntimeEnv,
   loadEnvironmentVariables,
   loadProjectConfig,
   resolveEnvTargetPath,
   upsertEnvVariable,
-  validateRuntimeEnv,
 } from "./shared.js";
 
 export function registerAuthCommand(program: Command): void {
@@ -38,16 +39,16 @@ export function registerAuthCommand(program: Command): void {
         };
 
         loadEnvironmentVariables(config, loaded.projectRoot);
-        const missing = validateRuntimeEnv(config);
-        if (missing.length > 0) {
-          throw new Error(`Missing required env vars for userbot: ${missing.join(", ")}`);
-        }
+        ensureRuntimeEnv(config);
 
         const rl = createInterface({ input: process.stdin, output: process.stdout });
         try {
           const phone = opts.phone?.trim() || (await rl.question("Phone number (+countrycode): ")).trim();
           if (!phone) {
-            throw new Error("Phone number is required.");
+            throw new HapticCliError({
+              code: "HPTCLI_AUTH_PHONE_REQUIRED",
+              message: "Phone number is required.",
+            });
           }
 
           let codeInput = opts.code?.trim();
@@ -76,7 +77,11 @@ export function registerAuthCommand(program: Command): void {
               return passwordInput;
             },
             onError: (err) => {
-              throw err;
+              throw new HapticCliError({
+                code: "HPTCLI_AUTH_LOGIN_FAILED",
+                message: "Telegram login failed.",
+                cause: err,
+              });
             },
           });
 
@@ -94,4 +99,3 @@ export function registerAuthCommand(program: Command): void {
       },
     );
 }
-

@@ -1,7 +1,13 @@
-﻿import path from "node:path";
+import path from "node:path";
 import { compileHapticFile } from "@haptic/core";
 import type { Command } from "commander";
-import { loadEnvironmentVariables, loadProjectConfig, resolveEntryPath } from "./shared.js";
+import { HapticCliError } from "../errors.js";
+import {
+  ensureEntryExists,
+  loadEnvironmentVariables,
+  loadProjectConfig,
+  resolveEntryPath,
+} from "./shared.js";
 
 export function registerBuildCommand(program: Command): void {
   program
@@ -20,11 +26,20 @@ export function registerBuildCommand(program: Command): void {
       };
 
       const entry = resolveEntryPath(opts.entry, resolvedConfig, loaded.projectRoot);
-      const result = await compileHapticFile(path.resolve(entry), resolvedConfig);
-      process.stdout.write(`Built (dev artifact): ${result.outFile}\n`);
-      if (envLoaded.loadedPaths.length > 0) {
-        process.stdout.write(`Env loaded: ${envLoaded.loadedPaths.join(", ")}\n`);
+      ensureEntryExists(entry);
+
+      try {
+        const result = await compileHapticFile(path.resolve(entry), resolvedConfig);
+        process.stdout.write(`Built (dev artifact): ${result.outFile}\n`);
+        if (envLoaded.loadedPaths.length > 0) {
+          process.stdout.write(`Env loaded: ${envLoaded.loadedPaths.join(", ")}\n`);
+        }
+      } catch (error) {
+        throw new HapticCliError({
+          code: "HPTCLI_BUILD_FAILED",
+          message: `Build failed for ${entry}`,
+          cause: error,
+        });
       }
     });
 }
-

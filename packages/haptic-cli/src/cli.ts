@@ -1,5 +1,6 @@
-﻿#!/usr/bin/env node
+#!/usr/bin/env node
 import { Command } from "commander";
+import { formatCliError, getCliExitCode } from "./errors.js";
 import { registerAuthCommand } from "./commands/auth.js";
 import { registerBenchmarkCommand } from "./commands/benchmark.js";
 import { registerBuildCommand } from "./commands/build.js";
@@ -25,8 +26,8 @@ registerTestCommand(program);
 registerWizardCommand(program);
 
 program.parseAsync(normalizeDirectEntryArgv(process.argv)).catch((error) => {
-  process.stderr.write(`${String(error)}\n`);
-  process.exit(1);
+  process.stderr.write(formatCliError(error));
+  process.exit(getCliExitCode(error));
 });
 
 function normalizeDirectEntryArgv(argv: string[]): string[] {
@@ -45,6 +46,5 @@ function normalizeDirectEntryArgv(argv: string[]): string[] {
     return argv;
   }
 
-  // `haptic bot.haptic --monitor` => `haptic run --entry bot.haptic --monitor`
   return [...argv.slice(0, 2), "run", "--entry", firstArg, ...args.slice(1)];
 }

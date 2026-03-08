@@ -1,0 +1,14 @@
+{
+  "name": "streotest",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "haptic build",
+    "run": "haptic run",
+    "dev": "haptic dev",
+    "doctor": "haptic doctor"
+  },
+  "dependencies": {
+    "telegraf": "^4.16.3"
+  }
+}
