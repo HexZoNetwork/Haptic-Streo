@@ -7,4 +7,5 @@ export * from "./commands/new.js";
 export * from "./commands/run.js";
 export * from "./commands/shared.js";
 export * from "./commands/test.js";
+export * from "./commands/transform.js";
 export * from "./commands/wizard.js";

@@ -43,6 +43,21 @@ Setup project existing via wizard:
 4. `npm install`
 5. `npm run build`
 
+## Transform
+
+Ubah JavaScript menjadi source `Haptic`:
+
+1. `haptic transform bot.js`
+2. `haptic transform .`
+
+Perilaku default:
+
+- scan `.js`, `.mjs`, `.cjs`
+- skip folder tersembunyi dan `node_modules`
+- generate file `.haptic` di samping source asli
+- jika ada `config.hpconf`, entry `.js` akan di-sync ke `.haptic`
+- jika ada `package.json` dan `engine` di config, dependency + script akan di-sync
+
 ## Syntax Support
 
 - DSL block style `:` ... `end` dan `{ ... }`

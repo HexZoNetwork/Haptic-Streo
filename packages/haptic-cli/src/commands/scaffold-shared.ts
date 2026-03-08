@@ -66,6 +66,49 @@ export function createProjectPackageJson(name: string, engine: HapticEngine): Re
   };
 }
 
+export function syncProjectPackageJson(projectRoot: string, engine: HapticEngine, name?: string): string {
+  const packagePath = path.join(projectRoot, "package.json");
+  const normalizedName = name ?? path.basename(projectRoot);
+  const nextTemplate = createProjectPackageJson(normalizedName, engine) as {
+    name: string;
+    private: boolean;
+    type: string;
+    scripts: Record<string, string>;
+    dependencies: Record<string, string>;
+  };
+
+  const existing = fs.existsSync(packagePath)
+    ? (JSON.parse(fs.readFileSync(packagePath, "utf8")) as Record<string, unknown>)
+    : {};
+  const dependencies = {
+    ...toRecord(existing.dependencies),
+    ...nextTemplate.dependencies,
+  };
+
+  for (const candidate of Object.keys(ENGINE_DEPENDENCIES)) {
+    const dependency = ENGINE_DEPENDENCIES[candidate as HapticEngine].packageName;
+    if (candidate !== engine) {
+      delete dependencies[dependency];
+    }
+  }
+
+  const payload = {
+    ...existing,
+    name: typeof existing.name === "string" && existing.name.trim() ? existing.name : nextTemplate.name,
+    private: typeof existing.private === "boolean" ? existing.private : nextTemplate.private,
+    type: typeof existing.type === "string" && existing.type.trim() ? existing.type : nextTemplate.type,
+    scripts: {
+      ...toRecord(existing.scripts),
+      ...nextTemplate.scripts,
+    },
+    dependencies,
+  };
+
+  provisionLocalCliBinary(projectRoot);
+  fs.writeFileSync(packagePath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  return packagePath;
+}
+
 export function provisionLocalCliBinary(projectRoot: string): string {
   const source = resolveLocalCliSource();
   const target = path.join(projectRoot, LOCAL_CLI_RELATIVE_PATH);
@@ -92,4 +135,16 @@ function resolveLocalCliSource(): string {
     code: "HPTCLI_LOCAL_BINARY_NOT_FOUND",
     message: "Unable to locate local Haptic CLI binary for project scaffolding.",
   });
+}
+
+function toRecord(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+
+  const entries = Object.entries(value as Record<string, unknown>).filter((entry): entry is [string, string] => {
+    return typeof entry[1] === "string";
+  });
+
+  return Object.fromEntries(entries);
 }

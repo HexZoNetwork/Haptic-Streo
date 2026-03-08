@@ -9,6 +9,7 @@ import { registerDoctorCommand } from "./commands/doctor.js";
 import { registerNewCommand } from "./commands/new.js";
 import { registerRunCommand } from "./commands/run.js";
 import { registerTestCommand } from "./commands/test.js";
+import { registerTransformCommand } from "./commands/transform.js";
 import { registerWizardCommand } from "./commands/wizard.js";
 
 const program = new Command();
@@ -23,6 +24,7 @@ registerDevCommand(program);
 registerBenchmarkCommand(program);
 registerDoctorCommand(program);
 registerTestCommand(program);
+registerTransformCommand(program);
 registerWizardCommand(program);
 
 program.parseAsync(normalizeDirectEntryArgv(process.argv)).catch((error) => {

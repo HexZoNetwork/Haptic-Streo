@@ -17,7 +17,7 @@
     "publish:packages": "node scripts/publish-packages.mjs",
     "publish:dry-run": "node scripts/publish-packages.mjs --dry-run",
     "lint": "echo \"lint not configured yet\"",
-    "test": "npm run build && node scripts/test-scaffold.mjs && node scripts/test-parser.mjs && node scripts/test-errors.mjs"
+    "test": "npm run build && node scripts/test-scaffold.mjs && node scripts/test-parser.mjs && node scripts/test-transform.mjs && node scripts/test-errors.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.13.10",
@@ -25,5 +25,4 @@
     "typescript": "^5.8.2"
   }
 }
-
 
