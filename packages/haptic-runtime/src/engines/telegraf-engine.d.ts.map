@@ -1,0 +1,1 @@
+{"version":3,"file":"telegraf-engine.d.ts","sourceRoot":"","sources":["telegraf-engine.ts"],"names":[],"mappings":"AAAA,MAAM,WAAW,aAAa;IAC5B,QAAQ,CAAC,IAAI,EAAE,UAAU,GAAG,QAAQ,CAAC;IACrC,SAAS,IAAI,OAAO,CAAC,IAAI,CAAC,CAAC;CAC5B;AAED,qBAAa,cAAe,YAAW,aAAa;IAClD,QAAQ,CAAC,IAAI,EAAG,UAAU,CAAU;IAE9B,SAAS,IAAI,OAAO,CAAC,IAAI,CAAC;CAGjC"}

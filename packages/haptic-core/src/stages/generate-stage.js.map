@@ -1,0 +1,1 @@
+{"version":3,"file":"generate-stage.js","sourceRoot":"","sources":["generate-stage.ts"],"names":[],"mappings":"AACA,OAAO,EAAE,kBAAkB,EAAE,MAAM,oBAAoB,CAAC;AAExD,MAAM,UAAU,aAAa,CAAC,GAAgB,EAAE,MAA6B;IAC3E,OAAO,kBAAkB,CAAC,GAAG,EAAE,EAAE,MAAM,EAAE,CAAC,CAAC;AAC7C,CAAC"}

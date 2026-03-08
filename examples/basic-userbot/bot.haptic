@@ -1,0 +1,12 @@
+﻿userbot "MyUserbot":
+ api_id = env("API_ID")
+ api_hash = env("API_HASH")
+end
+
+command ping:
+ reply "pong"
+end
+
+on message match /hello/i:
+ reply "hi there"
+end

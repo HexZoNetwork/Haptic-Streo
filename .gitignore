@@ -1,0 +1,11 @@
+﻿node_modules/
+**/dist/
+.npm/
+.env
+.env.*
+!.env*.example
+.hpcache/
+examples/*/.env
+examples/*/.env.*
+examples/*/dist/
+examples/*/node_modules/

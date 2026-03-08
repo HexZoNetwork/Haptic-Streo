@@ -1,0 +1,14 @@
+﻿{
+  "files": [],
+  "references": [
+    { "path": "packages/haptic-utils" },
+    { "path": "packages/haptic-ast" },
+    { "path": "packages/haptic-parser" },
+    { "path": "packages/haptic-transpiler" },
+    { "path": "packages/haptic-plugin-system" },
+    { "path": "packages/haptic-ai" },
+    { "path": "packages/haptic-runtime" },
+    { "path": "packages/haptic-core" },
+    { "path": "packages/haptic-cli" }
+  ]
+}

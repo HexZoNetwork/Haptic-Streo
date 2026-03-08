@@ -1,0 +1,38 @@
+﻿bot "ExampleBot":
+ token = env("BOT_TOKEN")
+end
+
+db users:
+ id int
+ username text
+ points int
+end
+
+func greet(name):
+ return "Hello " + name
+end
+
+command start:
+ let sample = [user.username]
+ for item in sample:
+  log item
+ end
+
+ if user.id == 1:
+  reply await greet(user.username)
+ else:
+  reply "access denied"
+ end
+
+ insert users:
+  username = user.username
+  points = 10
+ end
+
+ select * from users where username = user.username
+ console.log("raw js in DSL block jalan")
+end
+
+on message match /ping/i:
+ reply "pong"
+end

@@ -1,0 +1,11 @@
+bot "MyBot" {
+ token = env("BOT_TOKEN")
+}
+
+command start {
+ reply "hello " + user.username
+}
+
+on message match /ping/i {
+ reply "pong"
+}

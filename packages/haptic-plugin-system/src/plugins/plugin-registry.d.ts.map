@@ -1,0 +1,1 @@
+{"version":3,"file":"plugin-registry.d.ts","sourceRoot":"","sources":["plugin-registry.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,YAAY,EAAE,MAAM,iBAAiB,CAAC;AAEpD,qBAAa,cAAc;IACzB,OAAO,CAAC,QAAQ,CAAC,OAAO,CAAmC;IAE3D,QAAQ,CAAC,MAAM,EAAE,YAAY,GAAG,IAAI;IAIpC,MAAM,IAAI,YAAY,EAAE;CAGzB"}

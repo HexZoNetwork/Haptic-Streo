@@ -1,0 +1,19 @@
+{
+  "name": "haptic-streo",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Haptic CLI for Telegram automation DSL",
+  "bin": {
+    "haptic": "bin/haptic.js"
+  },
+  "files": [
+    "bin",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@haptic/cli": "0.1.0"
+  }
+}

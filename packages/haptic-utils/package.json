@@ -1,0 +1,14 @@
+﻿{
+  "name": "@haptic/utils",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": { "build": "tsc -p tsconfig.json" }
+}

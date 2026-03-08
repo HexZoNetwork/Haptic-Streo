@@ -1,0 +1,13 @@
+﻿bot "TryBot":
+ token = env("BOT_TOKEN")
+end
+
+command start:
+ try:
+  let x = JSON.parse("{")
+  reply "ok"
+ catch err:
+  log err.message
+  reply "failed"
+ end
+end

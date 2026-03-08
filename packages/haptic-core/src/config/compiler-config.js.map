@@ -1,0 +1,1 @@
+{"version":3,"file":"compiler-config.js","sourceRoot":"","sources":["compiler-config.ts"],"names":[],"mappings":"AAYA,MAAM,UAAU,qBAAqB,CAAC,SAAyB,EAAE;IAC/D,OAAO;QACL,MAAM,EAAE,MAAM,CAAC,MAAM,IAAI,UAAU;QACnC,MAAM,EAAE,MAAM,CAAC,MAAM,IAAI,MAAM;QAC/B,OAAO,EAAE,MAAM,CAAC,OAAO,IAAI,EAAE;KAC9B,CAAC;AACJ,CAAC"}

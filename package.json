@@ -1,0 +1,29 @@
+{
+  "name": "haptic",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Haptic language ecosystem monorepo",
+  "workspaces": [
+    "packages/*",
+    "examples/*"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "dev": "npm run -w @haptic/cli dev",
+    "haptic": "node packages/haptic-cli/dist/cli.js",
+    "install:cli": "node scripts/install-cli.mjs",
+    "uninstall:cli": "node scripts/uninstall-cli.mjs",
+    "pack:tarballs": "node scripts/pack-tarballs.mjs",
+    "publish:packages": "node scripts/publish-packages.mjs",
+    "publish:dry-run": "node scripts/publish-packages.mjs --dry-run",
+    "lint": "echo \"lint not configured yet\"",
+    "test": "echo \"tests not configured yet\""
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "typescript": "^5.8.2"
+  },
+  "dependencies": {
+    "haptic": "^0.1.0"
+  }
+}

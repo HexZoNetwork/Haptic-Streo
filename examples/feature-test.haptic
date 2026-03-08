@@ -1,0 +1,12 @@
+﻿bot "Test" {
+ token = env("BOT_TOKEN")
+}
+
+on command "/start" {
+ reply "ok"
+}
+
+on message {
+ log message.text
+ send chat.id "hello"
+}

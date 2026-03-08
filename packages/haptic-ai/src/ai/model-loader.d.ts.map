@@ -1,0 +1,1 @@
+{"version":3,"file":"model-loader.d.ts","sourceRoot":"","sources":["model-loader.ts"],"names":[],"mappings":"AAAA,MAAM,MAAM,qBAAqB,GAAG,cAAc,GAAG,MAAM,GAAG,aAAa,CAAC;AAE5E,MAAM,WAAW,WAAW;IAC1B,OAAO,EAAE,qBAAqB,CAAC;IAC/B,EAAE,EAAE,MAAM,CAAC;CACZ;AAED,wBAAsB,SAAS,CAAC,OAAO,EAAE,qBAAqB,EAAE,EAAE,EAAE,MAAM,GAAG,OAAO,CAAC,WAAW,CAAC,CAEhG"}

@@ -1,0 +1,9 @@
+{
+  "name": "basic-bot",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "install:cli": "npm --prefix ../.. run install:cli",
+    "uninstall:cli": "npm --prefix ../.. run uninstall:cli"
+  }
+}

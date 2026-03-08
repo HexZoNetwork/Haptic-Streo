@@ -1,0 +1,17 @@
+.git
+.github
+.vscode
+.idea
+node_modules
+**/node_modules
+**/.env
+**/.env.*
+!**/.env*.example
+examples
+playground
+docs
+.hpcache
+dist
+release
+*.log
+npm-debug.log*

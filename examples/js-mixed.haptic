@@ -1,0 +1,15 @@
+﻿bot "JsMix":
+ token = env("BOT_TOKEN")
+end
+
+const outside = Math.random()
+console.log("outside", outside)
+
+command test:
+ const value = Math.random()
+ if value > 0.5:
+  reply "big"
+ else:
+  reply "small"
+ end
+end

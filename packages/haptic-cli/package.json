@@ -1,0 +1,25 @@
+﻿{
+  "name": "@haptic/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "haptic": "dist/cli.js"
+  },
+  "scripts": { "build": "tsc -p tsconfig.json" },
+  "dependencies": {
+    "@haptic/core": "0.1.0",
+    "@haptic/utils": "0.1.0",
+    "chokidar": "^4.0.3",
+    "commander": "^14.0.1",
+    "dotenv": "^16.6.1",
+    "telegram": "^2.26.22"
+  }
+}
