@@ -21,6 +21,7 @@ import {
   type ProgramNode,
   type StatementNode,
 } from "@haptic/ast";
+import { parseExpression } from "./expression-parser.js";
 
 export interface ParserDiagnostic {
   readonly code: string;
@@ -73,6 +74,9 @@ export function parseDsl(source: string): ParseResult {
     }
 
     if (!isTopLevelBlockStart(line)) {
+      if (looksLikeMalformedTopLevelDsl(line)) {
+        parseErrors.push(error("HPT1001", `Malformed top-level DSL block: ${line}`, i + 1));
+      }
       jsPreamble.push(rawLine);
       i += 1;
       continue;
@@ -137,12 +141,13 @@ function parseTopLevelBlock(
     return;
   }
 
-  const functionMatch = header.match(/^func\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:\(([^)]*)\))?$/);
+  const functionMatch = header.match(/^(?:func|fn)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:\(([^)]*)\))?$/);
   if (functionMatch) {
+    const params = parseParams(functionMatch[2], block.startLine, errors);
     body.push(
       createFunctionNode(
         functionMatch[1],
-        parseParams(functionMatch[2]),
+        params,
         parseStatements(block.lines, block.startLine, errors),
       ),
     );
@@ -188,31 +193,56 @@ function parseStatements(
 
     const replyMatch = line.match(/^reply\s+(.+)$/);
     if (replyMatch) {
-      statements.push(createReplyNode(stripTrailingSemicolon(replyMatch[1])));
+      const expression = parseInlineExpression(stripTrailingSemicolon(replyMatch[1]), startLine + idx, errors, "reply");
+      if (expression) {
+        statements.push(createReplyNode(expression));
+      }
       idx += 1;
       continue;
     }
 
     const logMatch = line.match(/^log\s+(.+)$/);
     if (logMatch) {
-      statements.push(createLogNode(stripTrailingSemicolon(logMatch[1])));
+      const expression = parseInlineExpression(stripTrailingSemicolon(logMatch[1]), startLine + idx, errors, "log");
+      if (expression) {
+        statements.push(createLogNode(expression));
+      }
       idx += 1;
       continue;
     }
 
     const sendMatch = line.match(/^send\s+(\S+)\s+(.+)$/);
     if (sendMatch) {
-      statements.push(createSendNode(stripTrailingSemicolon(sendMatch[1]), stripTrailingSemicolon(sendMatch[2])));
+      const targetExpression = parseInlineExpression(stripTrailingSemicolon(sendMatch[1]), startLine + idx, errors, "send target");
+      const messageExpression = parseInlineExpression(
+        stripTrailingSemicolon(sendMatch[2]),
+        startLine + idx,
+        errors,
+        "send message",
+      );
+      if (targetExpression && messageExpression) {
+        statements.push(createSendNode(targetExpression, messageExpression));
+      }
       idx += 1;
       continue;
     }
 
     const declarationMatch = line.match(/^(let|const|var)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(.+)$/);
     if (declarationMatch) {
+      const expression = parseInlineExpression(
+        stripTrailingSemicolon(declarationMatch[3]),
+        startLine + idx,
+        errors,
+        `${declarationMatch[1]} initializer`,
+      );
+      if (!expression) {
+        idx += 1;
+        continue;
+      }
       statements.push(
         createLetNode(
           declarationMatch[2],
-          stripTrailingSemicolon(declarationMatch[3]),
+          expression,
           declarationMatch[1] as "let" | "const" | "var",
         ),
       );
@@ -222,7 +252,11 @@ function parseStatements(
 
     const returnMatch = line.match(/^return(?:\s+(.+))?$/);
     if (returnMatch) {
-      statements.push(createReturnNode(stripTrailingSemicolon(returnMatch[1] ?? "") || undefined));
+      const rawExpression = stripTrailingSemicolon(returnMatch[1] ?? "");
+      const expression = rawExpression
+        ? parseInlineExpression(rawExpression, startLine + idx, errors, "return")
+        : undefined;
+      statements.push(createReturnNode(expression || undefined));
       idx += 1;
       continue;
     }
@@ -235,14 +269,24 @@ function parseStatements(
 
     const selectMatch = line.match(/^select\s+\*\s+from\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\s+where\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(.+))?$/i);
     if (selectMatch) {
+      const whereExpression = selectMatch[3]
+        ? parseInlineExpression(stripTrailingSemicolon(selectMatch[3]), startLine + idx, errors, "select where")
+        : undefined;
       statements.push(
         createSelectNode(
           selectMatch[1],
           stripTrailingSemicolon(line),
           selectMatch[2],
-          selectMatch[3] ? stripTrailingSemicolon(selectMatch[3]) : undefined,
+          whereExpression,
         ),
       );
+      idx += 1;
+      continue;
+    }
+
+    const dslError = classifyMalformedStatement(line);
+    if (dslError) {
+      errors.push(error(dslError.code, dslError.message, startLine + idx));
       idx += 1;
       continue;
     }
@@ -264,30 +308,59 @@ function parseStatementBlock(
 
   const ifMatch = header.match(/^if\s+(.+)$/);
   if (ifMatch) {
+    const condition = parseInlineExpression(stripTrailingSemicolon(ifMatch[1]), block.startLine - 1, errors, "if");
     const ifBody = parseStatements(block.lines, block.startLine, errors);
 
     let elseBody: StatementNode[] | undefined;
     let nextIndex = block.nextIndex;
     const elseIndex = findNextMeaningfulIndex(sourceLines, nextIndex);
 
-    if (elseIndex !== undefined && sourceLines[elseIndex].trim() === "else {") {
-      const elseBlock = collectBraceBlock(sourceLines, elseIndex, errors);
-      if (elseBlock) {
-        elseBody = parseStatements(elseBlock.lines, elseBlock.startLine, errors);
-        nextIndex = elseBlock.nextIndex;
+    if (elseIndex !== undefined) {
+      const elseHeader = sourceLines[elseIndex].trim();
+      if (elseHeader === "else {") {
+        const elseBlock = collectBraceBlock(sourceLines, elseIndex, errors);
+        if (elseBlock) {
+          elseBody = parseStatements(elseBlock.lines, elseBlock.startLine, errors);
+          nextIndex = elseBlock.nextIndex;
+        }
+      } else {
+        const elseIfHeader = normalizeElseIfHeader(elseHeader);
+        if (elseIfHeader) {
+          const elseIfBlock = collectBraceBlock(sourceLines, elseIndex, errors);
+          if (elseIfBlock) {
+            const nested: StatementNode[] = [];
+            const normalizedBlock: CollectedBlock = {
+              ...elseIfBlock,
+              header: elseIfHeader,
+            };
+            nextIndex = parseStatementBlock(normalizedBlock, sourceLines, errors, nested);
+            elseBody = nested;
+          }
+        }
       }
     }
 
-    out.push(createConditionNode(stripTrailingSemicolon(ifMatch[1]), ifBody, elseBody));
+    if (condition) {
+      out.push(createConditionNode(condition, ifBody, elseBody));
+    }
     return nextIndex;
   }
 
   const forMatch = header.match(/^for\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+in\s+(.+)$/);
   if (forMatch) {
+    const iterableExpression = parseInlineExpression(
+      stripTrailingSemicolon(forMatch[2]),
+      block.startLine - 1,
+      errors,
+      "for iterable",
+    );
+    if (!iterableExpression) {
+      return block.nextIndex;
+    }
     out.push(
       createLoopNode(
         forMatch[1],
-        stripTrailingSemicolon(forMatch[2]),
+        iterableExpression,
         parseStatements(block.lines, block.startLine, errors),
       ),
     );
@@ -360,7 +433,17 @@ function parseAssignments(
       continue;
     }
 
-    config[match[1]] = stripTrailingSemicolon(match[2]);
+    if (Object.hasOwn(config, match[1])) {
+      errors.push(error("HPT1007", `Duplicate assignment key: ${match[1]}`, startLine + idx));
+      continue;
+    }
+
+    const expression = parseInlineExpression(stripTrailingSemicolon(match[2]), startLine + idx, errors, `assignment ${match[1]}`);
+    if (!expression) {
+      continue;
+    }
+
+    config[match[1]] = expression;
   }
 
   return config;
@@ -387,16 +470,32 @@ function parseDbFields(lines: string[], startLine: number, errors: ParserDiagnos
   return fields;
 }
 
-function parseParams(raw?: string): string[] {
+function parseParams(raw: string | undefined, line: number, errors: ParserDiagnostic[]): string[] {
   if (!raw?.trim()) {
     return [];
   }
 
-  return raw
-    .split(",")
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .map((part) => part.replace(/[^a-zA-Z0-9_]/g, ""));
+  const params: string[] = [];
+  const seen = new Set<string>();
+
+  for (const part of raw.split(",")) {
+    const param = part.trim();
+    if (!param) {
+      continue;
+    }
+    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(param)) {
+      errors.push(error("HPT1013", `Invalid function parameter: ${param}`, line));
+      continue;
+    }
+    if (seen.has(param)) {
+      errors.push(error("HPT1014", `Duplicate function parameter: ${param}`, line));
+      continue;
+    }
+    seen.add(param);
+    params.push(param);
+  }
+
+  return params;
 }
 
 function collectBraceBlock(
@@ -461,7 +560,7 @@ function isTopLevelBlockStart(line: string): boolean {
     /^userbot\s+"[^"]+"\s*\{$/.test(line) ||
     /^command\s+[a-zA-Z_][a-zA-Z0-9_]*\s*\{$/.test(line) ||
     /^on\s+(message|command)\b.*\{$/.test(line) ||
-    /^func\s+[a-zA-Z_][a-zA-Z0-9_]*\s*(?:\([^)]*\))?\s*\{$/.test(line) ||
+    /^(?:func|fn)\s+[a-zA-Z_][a-zA-Z0-9_]*\s*(?:\([^)]*\))?\s*\{$/.test(line) ||
     /^db\s+[a-zA-Z_][a-zA-Z0-9_]*\s*\{$/.test(line)
   );
 }
@@ -478,6 +577,13 @@ function preprocessColonSyntax(source: string): string {
     if (/^else\s*:$/.test(trimmed)) {
       output.push(`${indent}}`);
       output.push(`${indent}else {`);
+      continue;
+    }
+
+    const elseIf = trimmed.match(/^(?:else\s+if|elseif|elif)\s+(.+):$/);
+    if (elseIf) {
+      output.push(`${indent}}`);
+      output.push(`${indent}else if ${elseIf[1].trim()} {`);
       continue;
     }
 
@@ -514,7 +620,7 @@ function isConvertibleColonHeader(trimmed: string): boolean {
     /^userbot\s+"[^"]+"$/.test(header) ||
     /^command\s+[a-zA-Z_][a-zA-Z0-9_]*$/.test(header) ||
     /^on\s+(message|command)\b.*$/.test(header) ||
-    /^func\s+[a-zA-Z_][a-zA-Z0-9_]*\s*(?:\([^)]*\))?$/.test(header) ||
+    /^(?:func|fn)\s+[a-zA-Z_][a-zA-Z0-9_]*\s*(?:\([^)]*\))?$/.test(header) ||
     /^db\s+[a-zA-Z_][a-zA-Z0-9_]*$/.test(header) ||
     /^if\s+.+$/.test(header) ||
     /^try$/.test(header) ||
@@ -535,6 +641,56 @@ function normalizeCommandLiteral(input: string): string {
 
 function stripTrailingSemicolon(value: string): string {
   return value.replace(/;$/, "").trim();
+}
+
+function parseInlineExpression(
+  source: string,
+  line: number,
+  errors: ParserDiagnostic[],
+  label: string,
+): string | undefined {
+  try {
+    return parseExpression(source);
+  } catch (caught) {
+    const message = caught instanceof Error ? caught.message : String(caught);
+    errors.push(error("HPT1008", `${label}: ${message}`, line));
+    return undefined;
+  }
+}
+
+function normalizeElseIfHeader(header: string): string | undefined {
+  const elseIf = header.match(/^(?:else\s+if|elseif|elif)\s+(.+)\s*\{$/);
+  if (!elseIf) {
+    return undefined;
+  }
+  return `if ${elseIf[1].trim()}`;
+}
+
+function looksLikeMalformedTopLevelDsl(line: string): boolean {
+  return (
+    (/^(?:bot|userbot)\s+/.test(line) ||
+      /^command\s+/.test(line) ||
+      /^on\s+/.test(line) ||
+      /^(?:func|fn)\s+/.test(line) ||
+      /^db\s+/.test(line)) &&
+    !isTopLevelBlockStart(line)
+  );
+}
+
+function classifyMalformedStatement(line: string): ParserDiagnostic | undefined {
+  if (/^(reply|log|send)\s*$/.test(line)) {
+    return { code: "HPT1009", message: `Missing expression for statement: ${line.trim()}` };
+  }
+
+  if (/^(let|const|var)\b/.test(line) && !/^(let|const|var)\s+[a-zA-Z_][a-zA-Z0-9_]*\s*=/.test(line)) {
+    return { code: "HPT1011", message: `Invalid variable declaration: ${line.trim()}` };
+  }
+
+  if (/^(elseif|elif)\b/.test(line) && !line.endsWith("{")) {
+    return { code: "HPT1015", message: `Malformed DSL statement: ${line.trim()}` };
+  }
+
+  return undefined;
 }
 
 function createBraceScanner(): (line: string) => number {

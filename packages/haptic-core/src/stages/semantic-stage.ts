@@ -23,6 +23,18 @@ export function semanticStage(ast: ProgramNode): ProgramNode {
           });
         }
         seenFunctions.add(node.name);
+
+        const seenParams = new Set<string>();
+        for (const param of node.params) {
+          if (seenParams.has(param)) {
+            throw new HapticCompilerError({
+              code: "HPTC_SEMANTIC_DUPLICATE_PARAM",
+              message: `Duplicate parameter name in function ${node.name}: ${param}`,
+              stage: "semantic",
+            });
+          }
+          seenParams.add(param);
+        }
       }
 
       if (node.kind === "Db") {
@@ -34,6 +46,18 @@ export function semanticStage(ast: ProgramNode): ProgramNode {
           });
         }
         seenTables.add(node.name);
+
+        const seenFields = new Set<string>();
+        for (const field of node.fields) {
+          if (seenFields.has(field.name)) {
+            throw new HapticCompilerError({
+              code: "HPTC_SEMANTIC_DUPLICATE_DB_FIELD",
+              message: `Duplicate db field in table ${node.name}: ${field.name}`,
+              stage: "semantic",
+            });
+          }
+          seenFields.add(field.name);
+        }
       }
 
       continue;

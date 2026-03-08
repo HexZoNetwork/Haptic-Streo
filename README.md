@@ -47,9 +47,11 @@ Setup project existing via wizard:
 
 - DSL block style `:` ... `end` dan `{ ... }`
 - `bot`, `userbot`, `command`, `on message`, `on command`
-- `if/else`, `for in`, `func`, `try/catch`, `return`, `stop`
+- `if/else`, `else if`, `elseif`, `elif`, `for in`, `func`, `fn`, `try/catch`, `return`, `stop`
 - deklarasi `let`, `const`, `var`
+- operator DSL: `and`, `or`, `not`, `is`, `is not`, `nil`
 - mixed syntax: JS Node.js tetap bisa ditulis langsung
+- expression DSL divalidasi saat compile, jadi typo syntax lebih cepat ketahuan
 
 ## Config
 
