@@ -23,12 +23,10 @@ Highlight terbaru:
 
 Untuk user publik:
 
-1. `npm i -g haptic-streo`
+1. `npm i -g https://github.com/HexZoNetwork/Haptic-Streo/releases/download/Haptic/haptic-streo-0.1.0.tgz`
 2. `haptic --help`
 3. `haptic new bot mybot`
 4. `cd mybot`
-5. `npm run build`
-6. `node dist/bot.mjs`
 
 Project hasil `new` dan `wizard` otomatis membawa binary lokal ke `.haptic/bin/haptic.cjs`, jadi script `npm run build|run|dev|doctor` tidak bergantung pada global install.
 
