@@ -76,7 +76,7 @@ export async function runPipeline(
     });
   }
 
-  const output = generateStage(transformed, config.engine);
+  const output = generateStage(transformed, config.engine, config.moduleFormat);
 
   try {
     await runHook(registry, "afterGenerate", { ast: transformed, output });

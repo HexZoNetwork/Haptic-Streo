@@ -600,7 +600,10 @@ async function syncProjectFiles(projectRoot: string): Promise<SyncResult | undef
   }
 
   if (typeof nextConfig.engine === "string") {
-    packagePath = syncProjectPackageJson(projectRoot, normalizeEngine(nextConfig.engine));
+    packagePath = syncProjectPackageJson(projectRoot, normalizeEngine(nextConfig.engine), undefined, {
+      moduleFormat: nextConfig.moduleFormat,
+      packageConfig: nextConfig.package,
+    });
   }
 
   if (!configPath && !packagePath) {

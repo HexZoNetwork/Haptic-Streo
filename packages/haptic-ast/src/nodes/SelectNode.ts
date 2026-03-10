@@ -6,4 +6,6 @@ export interface SelectNode extends BaseNode {
   readonly whereField?: string;
   readonly whereExpression?: string;
   readonly rawQuery: string;
+  readonly resultVariable?: string;
+  readonly declarationKind?: "let" | "const" | "var";
 }

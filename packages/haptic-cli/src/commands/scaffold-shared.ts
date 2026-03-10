@@ -4,6 +4,7 @@ import { HapticCliError } from "../errors.js";
 
 export type HapticEngine = "telegraf" | "gramjs";
 export type HapticProjectType = "bot" | "userbot";
+export type HapticModuleFormat = "esm" | "cjs";
 
 const ENGINE_DEPENDENCIES = {
   telegraf: {
@@ -17,6 +18,11 @@ const ENGINE_DEPENDENCIES = {
 } as const satisfies Record<HapticEngine, { packageName: string; version: string }>;
 
 const LOCAL_CLI_RELATIVE_PATH = ".haptic/bin/haptic.cjs";
+
+interface ProjectPackageOptions {
+  moduleFormat?: HapticModuleFormat;
+  packageConfig?: Record<string, unknown>;
+}
 
 export function normalizeProjectType(value: string): HapticProjectType {
   const normalized = value.trim().toLowerCase();
@@ -42,17 +48,36 @@ export function normalizeEngine(value: string): HapticEngine {
   });
 }
 
+export function normalizeModuleFormat(value: string | undefined): HapticModuleFormat {
+  const normalized = value?.trim().toLowerCase() ?? "esm";
+  if (normalized === "esm" || normalized === "cjs") {
+    return normalized;
+  }
+
+  throw new HapticCliError({
+    code: "HPTCLI_MODULE_FORMAT_INVALID",
+    message: `Unknown module format: ${value}. Use "esm" or "cjs".`,
+  });
+}
+
 export function dependencyForEngine(engine: HapticEngine): { packageName: string; version: string } {
   return ENGINE_DEPENDENCIES[engine];
 }
 
-export function createProjectPackageJson(name: string, engine: HapticEngine): Record<string, unknown> {
+export function createProjectPackageJson(
+  name: string,
+  engine: HapticEngine,
+  options: ProjectPackageOptions = {},
+): Record<string, unknown> {
   const engineDependency = dependencyForEngine(engine);
+  const moduleFormat = options.moduleFormat ?? "esm";
+  const extension = moduleFormat === "cjs" ? ".cjs" : ".mjs";
 
-  return {
+  const base = {
     name,
     private: true,
-    type: "module",
+    type: moduleFormat === "cjs" ? "commonjs" : "module",
+    main: `dist/bot${extension}`,
     scripts: {
       dev: `node ${LOCAL_CLI_RELATIVE_PATH} dev`,
       build: `node ${LOCAL_CLI_RELATIVE_PATH} build`,
@@ -63,16 +88,24 @@ export function createProjectPackageJson(name: string, engine: HapticEngine): Re
     dependencies: {
       [engineDependency.packageName]: engineDependency.version,
     },
-  };
+  } as Record<string, unknown>;
+
+  return mergePackageConfig(base, options.packageConfig);
 }
 
-export function syncProjectPackageJson(projectRoot: string, engine: HapticEngine, name?: string): string {
+export function syncProjectPackageJson(
+  projectRoot: string,
+  engine: HapticEngine,
+  name?: string,
+  options: ProjectPackageOptions = {},
+): string {
   const packagePath = path.join(projectRoot, "package.json");
   const normalizedName = name ?? path.basename(projectRoot);
-  const nextTemplate = createProjectPackageJson(normalizedName, engine) as {
+  const nextTemplate = createProjectPackageJson(normalizedName, engine, options) as {
     name: string;
     private: boolean;
     type: string;
+    main?: string;
     scripts: Record<string, string>;
     dependencies: Record<string, string>;
   };
@@ -92,17 +125,21 @@ export function syncProjectPackageJson(projectRoot: string, engine: HapticEngine
     }
   }
 
-  const payload = {
-    ...existing,
-    name: typeof existing.name === "string" && existing.name.trim() ? existing.name : nextTemplate.name,
-    private: typeof existing.private === "boolean" ? existing.private : nextTemplate.private,
-    type: typeof existing.type === "string" && existing.type.trim() ? existing.type : nextTemplate.type,
-    scripts: {
-      ...toRecord(existing.scripts),
-      ...nextTemplate.scripts,
+  const payload = mergePackageConfig(
+    {
+      ...existing,
+      name: typeof existing.name === "string" && existing.name.trim() ? existing.name : nextTemplate.name,
+      private: typeof existing.private === "boolean" ? existing.private : nextTemplate.private,
+      type: typeof existing.type === "string" && existing.type.trim() ? existing.type : nextTemplate.type,
+      main: typeof existing.main === "string" && existing.main.trim() ? existing.main : nextTemplate.main,
+      scripts: {
+        ...toRecord(existing.scripts),
+        ...nextTemplate.scripts,
+      },
+      dependencies,
     },
-    dependencies,
-  };
+    options.packageConfig,
+  );
 
   provisionLocalCliBinary(projectRoot);
   fs.writeFileSync(packagePath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
@@ -135,6 +172,24 @@ function resolveLocalCliSource(): string {
     code: "HPTCLI_LOCAL_BINARY_NOT_FOUND",
     message: "Unable to locate local Haptic CLI binary for project scaffolding.",
   });
+}
+
+function mergePackageConfig(base: Record<string, unknown>, override?: Record<string, unknown>): Record<string, unknown> {
+  if (!override) {
+    return base;
+  }
+
+  const merged = { ...base, ...override };
+  merged.scripts = {
+    ...toRecord(base.scripts),
+    ...toRecord(override.scripts),
+  };
+  merged.dependencies = {
+    ...toRecord(base.dependencies),
+    ...toRecord(override.dependencies),
+  };
+
+  return merged;
 }
 
 function toRecord(value: unknown): Record<string, string> {

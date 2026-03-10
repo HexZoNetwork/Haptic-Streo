@@ -9,7 +9,9 @@ import {
   createProjectPackageJson,
   dependencyForEngine,
   type HapticEngine,
+  type HapticModuleFormat,
   normalizeEngine,
+  normalizeModuleFormat,
   provisionLocalCliBinary,
 } from "./scaffold-shared.js";
 
@@ -19,6 +21,7 @@ interface WizardOptions {
   entry?: string;
   profile?: string;
   skipInstall?: boolean;
+  moduleFormat?: HapticModuleFormat;
 }
 
 export function registerWizardCommand(program: Command): void {
@@ -27,6 +30,7 @@ export function registerWizardCommand(program: Command): void {
     .description("Interactive project wizard: config.hpconf, env profile, scripts, and deps")
     .option("-y, --yes", "Use defaults without prompts")
     .option("--engine <engine>", "telegraf | gramjs")
+    .option("--module-format <format>", "esm | cjs", "esm")
     .option("--entry <path>", "Entry .haptic file")
     .option("--profile <name>", "Env profile name", "testing")
     .option("--skip-install", "Skip npm dependency installation", false)
@@ -35,6 +39,7 @@ export function registerWizardCommand(program: Command): void {
 
       try {
         const engine = await resolveEngine(rl, opts);
+        const moduleFormat = normalizeModuleFormat(opts.moduleFormat);
         const entry = opts.entry ?? (await ask(rl, "Entry file", "bot.haptic", opts.yes));
         const profile = opts.profile ?? "testing";
 
@@ -48,11 +53,16 @@ export function registerWizardCommand(program: Command): void {
         const config = {
           entry,
           engine,
+          moduleFormat,
           outDir: "dist",
           cacheDir: ".hpcache",
           runtimeMode: "jit",
           profile,
           plugins: [],
+          package: {
+            name: path.basename(process.cwd()) || "haptic-project",
+            private: true,
+          },
         };
 
         provisionLocalCliBinary(process.cwd());
@@ -72,7 +82,7 @@ export function registerWizardCommand(program: Command): void {
           await writeTextFile(entryPath, defaultHapticTemplate(engine));
         }
 
-        await upsertPackageJson(engine);
+        await upsertPackageJson(engine, moduleFormat, config.package);
 
         if (!opts.skipInstall) {
           const engineDependency = dependencyForEngine(engine);
@@ -103,7 +113,11 @@ function defaultHapticTemplate(engine: HapticEngine): string {
   return `bot "MyBot":\n token = env("BOT_TOKEN")\nend\n\ncommand start:\n reply "hello " + user.username\nend\n`;
 }
 
-async function upsertPackageJson(engine: HapticEngine): Promise<void> {
+async function upsertPackageJson(
+  engine: HapticEngine,
+  moduleFormat: HapticModuleFormat,
+  packageConfig?: Record<string, unknown>,
+): Promise<void> {
   const packagePath = path.resolve(process.cwd(), "package.json");
   const hasPackage = fs.existsSync(packagePath);
 
@@ -114,7 +128,7 @@ async function upsertPackageJson(engine: HapticEngine): Promise<void> {
   const packageName = typeof base.name === "string" && base.name.trim() !== ""
     ? base.name
     : (path.basename(process.cwd()) || "haptic-project");
-  const template = createProjectPackageJson(packageName, engine);
+  const template = createProjectPackageJson(packageName, engine, { moduleFormat, packageConfig });
 
   base.private = base.private ?? true;
   base.type = base.type ?? "module";

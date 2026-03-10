@@ -29,7 +29,15 @@ async function testSingleFileTransformAndSync() {
   );
   await fs.writeFile(
     path.join(tempRoot, "config.hpconf"),
-    JSON.stringify({ entry: "bot.js", engine: "telegraf", profile: "testing" }, null, 2),
+    JSON.stringify({
+      entry: "bot.js",
+      engine: "telegraf",
+      moduleFormat: "cjs",
+      profile: "testing",
+      package: {
+        description: "legacy-js-project",
+      },
+    }, null, 2),
   );
   await fs.writeFile(
     path.join(tempRoot, "package.json"),
@@ -52,6 +60,9 @@ async function testSingleFileTransformAndSync() {
   assert.equal(pkg.dependencies.telegraf, "^4.16.3");
   assert.equal(pkg.dependencies.telegram, undefined);
   assert.equal(pkg.scripts.build, "node .haptic/bin/haptic.cjs build");
+  assert.equal(pkg.type, "commonjs");
+  assert.equal(pkg.main, "dist/bot.cjs");
+  assert.equal(pkg.description, "legacy-js-project");
 }
 
 async function testDirectoryTransformSkipsHiddenAndNodeModules() {

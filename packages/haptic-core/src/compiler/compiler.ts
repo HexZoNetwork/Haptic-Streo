@@ -21,10 +21,13 @@ export class HapticCompiler {
     this.config = resolveCompilerConfig(config);
   }
 
-  async compileSource(source: string): Promise<string> {
+  async compileSource(source: string, options: { sourcePath?: string } = {}): Promise<string> {
     try {
       const registry = await this.loadPlugins();
-      const result = await runPipeline(source, this.config, registry);
+      const resolvedSource = options.sourcePath
+        ? await resolveImportedSource(source, options.sourcePath)
+        : source;
+      const result = await runPipeline(resolvedSource, this.config, registry);
       return result.output;
     } catch (error) {
       throw ensureCompilerError(error, {
@@ -38,11 +41,12 @@ export class HapticCompiler {
   async compileFile(entryFile: string): Promise<CompileResult> {
     try {
       const source = await readTextFile(entryFile);
-      const code = await this.compileSource(source);
+      const code = await this.compileSource(source, { sourcePath: entryFile });
       const outDir = path.isAbsolute(this.config.outDir)
         ? this.config.outDir
         : path.join(process.cwd(), this.config.outDir);
-      const outFile = path.join(outDir, `${path.basename(entryFile, path.extname(entryFile))}.mjs`);
+      const extension = this.config.moduleFormat === "cjs" ? ".cjs" : ".mjs";
+      const outFile = path.join(outDir, `${path.basename(entryFile, path.extname(entryFile))}${extension}`);
 
       await ensureDir(path.dirname(outFile));
       await writeTextFile(outFile, code);
@@ -86,4 +90,41 @@ export async function compileHapticFile(
   config: CompilerConfig = {},
 ): Promise<CompileResult> {
   return new HapticCompiler(config).compileFile(entryFile);
+}
+
+async function resolveImportedSource(
+  source: string,
+  sourcePath: string,
+  seen = new Set<string>(),
+): Promise<string> {
+  const normalizedPath = path.resolve(sourcePath);
+  if (seen.has(normalizedPath)) {
+    throw new HapticCompilerError({
+      code: "HPTC_IMPORT_CYCLE",
+      message: `Import cycle detected at ${normalizedPath}`,
+      stage: "compile",
+    });
+  }
+
+  seen.add(normalizedPath);
+  const directory = path.dirname(normalizedPath);
+  const lines = source.replace(/\r\n/g, "\n").split("\n");
+  const output: string[] = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const importMatch = trimmed.match(/^import\s+"([^"]+\.haptic)"\s*;?$/);
+    if (!importMatch) {
+      output.push(line);
+      continue;
+    }
+
+    const importPath = path.resolve(directory, importMatch[1]);
+    const importedSource = await readTextFile(importPath);
+    output.push(`// import ${importMatch[1]}`);
+    output.push(await resolveImportedSource(importedSource, importPath, seen));
+  }
+
+  seen.delete(normalizedPath);
+  return output.join("\n");
 }

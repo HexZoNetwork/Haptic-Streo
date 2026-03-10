@@ -2,6 +2,23 @@
 
 Haptic adalah DSL Telegram automation yang di-transpile ke JavaScript Node.js.
 
+## Docs
+
+Mulai dari sini:
+
+- [Docs Overview](./docs/README.md)
+- [Syntax Reference](./docs/syntax.md)
+- [Tutorial Bot](./docs/tutorial-bot.md)
+- [Tutorial Userbot](./docs/tutorial-userbot.md)
+- [Troubleshooting](./docs/troubleshooting.md)
+
+Highlight terbaru:
+
+- `import "./shared.haptic"`
+- `export func ...`
+- output `esm` / `cjs`
+- `config.hpconf` bisa bawa metadata `package`
+
 ## Install (Public)
 
 Untuk user publik:
@@ -64,6 +81,7 @@ Perilaku default:
 - `bot`, `userbot`, `command`, `on message`, `on command`
 - `if/else`, `else if`, `elseif`, `elif`, `for in`, `func`, `fn`, `try/catch`, `return`, `stop`
 - deklarasi `let`, `const`, `var`
+- query data: `select`, `select ... into`, `insert`, `update ... where ...`, `delete from ... where ...`
 - operator DSL: `and`, `or`, `not`, `is`, `is not`, `nil`
 - mixed syntax: JS Node.js tetap bisa ditulis langsung
 - expression DSL divalidasi saat compile, jadi typo syntax lebih cepat ketahuan

@@ -1,7 +1,10 @@
 import {
   createBotNode,
+  createBreakNode,
   createCommandNode,
   createConditionNode,
+  createContinueNode,
+  createDeleteNode,
   createDbNode,
   createEventNode,
   createFunctionNode,
@@ -16,6 +19,8 @@ import {
   createSendNode,
   createStopNode,
   createTryCatchNode,
+  createUpdateNode,
+  createWhileNode,
   createLoopNode,
   type DbField,
   type ProgramNode,
@@ -51,7 +56,6 @@ interface BraceScannerState {
 export function parseDsl(source: string): ParseResult {
   const parseErrors: ParserDiagnostic[] = [];
   const body: StatementNode[] = [];
-  const jsPreamble: string[] = [];
 
   const normalized = preprocessColonSyntax(source.replace(/^\uFEFF/, ""));
   const lines = normalized.split(/\r?\n/);
@@ -62,13 +66,6 @@ export function parseDsl(source: string): ParseResult {
     const line = rawLine.trim();
 
     if (!line) {
-      jsPreamble.push(rawLine);
-      i += 1;
-      continue;
-    }
-
-    if (line.startsWith("//")) {
-      jsPreamble.push(rawLine);
       i += 1;
       continue;
     }
@@ -77,7 +74,7 @@ export function parseDsl(source: string): ParseResult {
       if (looksLikeMalformedTopLevelDsl(line)) {
         parseErrors.push(error("HPT1001", `Malformed top-level DSL block: ${line}`, i + 1));
       }
-      jsPreamble.push(rawLine);
+      body.push(createRawJsNode(rawLine));
       i += 1;
       continue;
     }
@@ -92,7 +89,7 @@ export function parseDsl(source: string): ParseResult {
   }
 
   return {
-    ast: createProgramNode(body, jsPreamble),
+    ast: createProgramNode(body),
     lexErrors: [],
     parseErrors,
   };
@@ -141,14 +138,15 @@ function parseTopLevelBlock(
     return;
   }
 
-  const functionMatch = header.match(/^(?:func|fn)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:\(([^)]*)\))?$/);
+  const functionMatch = header.match(/^(export\s+)?(?:func|fn)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:\(([^)]*)\))?$/);
   if (functionMatch) {
-    const params = parseParams(functionMatch[2], block.startLine, errors);
+    const params = parseParams(functionMatch[3], block.startLine, errors);
     body.push(
       createFunctionNode(
-        functionMatch[1],
+        functionMatch[2],
         params,
         parseStatements(block.lines, block.startLine, errors),
+        Boolean(functionMatch[1]),
       ),
     );
     return;
@@ -229,6 +227,42 @@ function parseStatements(
 
     const declarationMatch = line.match(/^(let|const|var)\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(.+)$/);
     if (declarationMatch) {
+      const selectAssignmentMatch = parseSelectQuery(declarationMatch[3]);
+      if (selectAssignmentMatch) {
+        if (selectAssignmentMatch.resultVariable) {
+          errors.push(
+            error(
+              "HPT1017",
+              "Do not combine variable assignment with select ... into. Use one form only.",
+              startLine + idx,
+            ),
+          );
+          idx += 1;
+          continue;
+        }
+
+        const whereExpression = selectAssignmentMatch.whereSource
+          ? parseInlineExpression(
+              stripTrailingSemicolon(selectAssignmentMatch.whereSource),
+              startLine + idx,
+              errors,
+              "select where",
+            )
+          : undefined;
+        statements.push(
+          createSelectNode(
+            selectAssignmentMatch.table,
+            stripTrailingSemicolon(selectAssignmentMatch.rawQuery),
+            selectAssignmentMatch.whereField,
+            whereExpression,
+            declarationMatch[2],
+            declarationMatch[1] as "let" | "const" | "var",
+          ),
+        );
+        idx += 1;
+        continue;
+      }
+
       const expression = parseInlineExpression(
         stripTrailingSemicolon(declarationMatch[3]),
         startLine + idx,
@@ -267,19 +301,71 @@ function parseStatements(
       continue;
     }
 
-    const selectMatch = line.match(/^select\s+\*\s+from\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\s+where\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(.+))?$/i);
+    if (line === "break") {
+      statements.push(createBreakNode());
+      idx += 1;
+      continue;
+    }
+
+    if (line === "continue") {
+      statements.push(createContinueNode());
+      idx += 1;
+      continue;
+    }
+
+    const selectMatch = parseSelectQuery(line);
     if (selectMatch) {
-      const whereExpression = selectMatch[3]
-        ? parseInlineExpression(stripTrailingSemicolon(selectMatch[3]), startLine + idx, errors, "select where")
-        : undefined;
-      statements.push(
-        createSelectNode(
-          selectMatch[1],
-          stripTrailingSemicolon(line),
-          selectMatch[2],
-          whereExpression,
+      if (selectMatch.resultVariable) {
+        const whereExpression = selectMatch.whereSource
+          ? parseInlineExpression(stripTrailingSemicolon(selectMatch.whereSource), startLine + idx, errors, "select where")
+          : undefined;
+        if (selectMatch.whereSource && !whereExpression) {
+          idx += 1;
+          continue;
+        }
+
+        statements.push(
+          createSelectNode(
+            selectMatch.table,
+            stripTrailingSemicolon(selectMatch.rawQuery),
+            selectMatch.whereField,
+            whereExpression,
+            selectMatch.resultVariable,
+            "let",
+          ),
+        );
+        idx += 1;
+        continue;
+      }
+
+      errors.push(
+        error(
+          "HPT1016",
+          "Select query results must be assigned with let, const, or var.",
+          startLine + idx,
         ),
       );
+      idx += 1;
+      continue;
+    }
+
+    const deleteMatch = parseDeleteQuery(line);
+    if (deleteMatch) {
+      if (!deleteMatch.whereField || !deleteMatch.whereSource) {
+        errors.push(error("HPT1018", "Delete statements must include a where clause.", startLine + idx));
+        idx += 1;
+        continue;
+      }
+
+      const whereExpression = parseInlineExpression(
+        stripTrailingSemicolon(deleteMatch.whereSource),
+        startLine + idx,
+        errors,
+        "delete where",
+      );
+      if (whereExpression) {
+        statements.push(createDeleteNode(deleteMatch.table, deleteMatch.whereField, whereExpression));
+      }
       idx += 1;
       continue;
     }
@@ -367,6 +453,22 @@ function parseStatementBlock(
     return block.nextIndex;
   }
 
+  const whileMatch = header.match(/^while\s+(.+)$/);
+  if (whileMatch) {
+    const condition = parseInlineExpression(
+      stripTrailingSemicolon(whileMatch[1]),
+      block.startLine - 1,
+      errors,
+      "while",
+    );
+    if (!condition) {
+      return block.nextIndex;
+    }
+
+    out.push(createWhileNode(condition, parseStatements(block.lines, block.startLine, errors)));
+    return block.nextIndex;
+  }
+
   const tryMatch = header.match(/^try$/);
   if (tryMatch) {
     const tryBody = parseStatements(block.lines, block.startLine, errors);
@@ -406,6 +508,34 @@ function parseStatementBlock(
   const insertMatch = header.match(/^insert\s+([a-zA-Z_][a-zA-Z0-9_]*)$/);
   if (insertMatch) {
     out.push(createInsertNode(insertMatch[1], parseAssignments(block.lines, block.startLine, errors)));
+    return block.nextIndex;
+  }
+
+  const updateMatch = parseUpdateHeader(header);
+  if (updateMatch) {
+    if (!updateMatch.whereField || !updateMatch.whereSource) {
+      errors.push(error("HPT1019", "Update blocks must include a where clause.", block.startLine));
+      return block.nextIndex;
+    }
+
+    const whereExpression = parseInlineExpression(
+      stripTrailingSemicolon(updateMatch.whereSource),
+      block.startLine - 1,
+      errors,
+      "update where",
+    );
+    if (!whereExpression) {
+      return block.nextIndex;
+    }
+
+    out.push(
+      createUpdateNode(
+        updateMatch.table,
+        updateMatch.whereField,
+        whereExpression,
+        parseAssignments(block.lines, block.startLine, errors),
+      ),
+    );
     return block.nextIndex;
   }
 
@@ -560,7 +690,7 @@ function isTopLevelBlockStart(line: string): boolean {
     /^userbot\s+"[^"]+"\s*\{$/.test(line) ||
     /^command\s+[a-zA-Z_][a-zA-Z0-9_]*\s*\{$/.test(line) ||
     /^on\s+(message|command)\b.*\{$/.test(line) ||
-    /^(?:func|fn)\s+[a-zA-Z_][a-zA-Z0-9_]*\s*(?:\([^)]*\))?\s*\{$/.test(line) ||
+    /^(?:export\s+)?(?:func|fn)\s+[a-zA-Z_][a-zA-Z0-9_]*\s*(?:\([^)]*\))?\s*\{$/.test(line) ||
     /^db\s+[a-zA-Z_][a-zA-Z0-9_]*\s*\{$/.test(line)
   );
 }
@@ -620,12 +750,14 @@ function isConvertibleColonHeader(trimmed: string): boolean {
     /^userbot\s+"[^"]+"$/.test(header) ||
     /^command\s+[a-zA-Z_][a-zA-Z0-9_]*$/.test(header) ||
     /^on\s+(message|command)\b.*$/.test(header) ||
-    /^(?:func|fn)\s+[a-zA-Z_][a-zA-Z0-9_]*\s*(?:\([^)]*\))?$/.test(header) ||
+    /^(?:export\s+)?(?:func|fn)\s+[a-zA-Z_][a-zA-Z0-9_]*\s*(?:\([^)]*\))?$/.test(header) ||
     /^db\s+[a-zA-Z_][a-zA-Z0-9_]*$/.test(header) ||
     /^if\s+.+$/.test(header) ||
     /^try$/.test(header) ||
     /^for\s+[a-zA-Z_][a-zA-Z0-9_]*\s+in\s+.+$/.test(header) ||
-    /^insert\s+[a-zA-Z_][a-zA-Z0-9_]*$/.test(header)
+    /^while\s+.+$/.test(header) ||
+    /^insert\s+[a-zA-Z_][a-zA-Z0-9_]*$/.test(header) ||
+    /^update\s+[a-zA-Z_][a-zA-Z0-9_]*(?:\s+where\s+[a-zA-Z_][a-zA-Z0-9_]*\s*=\s*.+)?$/.test(header)
   );
 }
 
@@ -641,6 +773,67 @@ function normalizeCommandLiteral(input: string): string {
 
 function stripTrailingSemicolon(value: string): string {
   return value.replace(/;$/, "").trim();
+}
+
+function parseSelectQuery(line: string): {
+  table: string;
+  rawQuery: string;
+  whereField?: string;
+  whereSource?: string;
+  resultVariable?: string;
+} | undefined {
+  const match = line.match(
+    /^select\s+\*\s+from\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\s+where\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(.+?))?(?:\s+into\s+([a-zA-Z_][a-zA-Z0-9_]*))?$/i,
+  );
+  if (!match) {
+    return undefined;
+  }
+
+  return {
+    table: match[1],
+    rawQuery: line,
+    whereField: match[2],
+    whereSource: match[3],
+    resultVariable: match[4],
+  };
+}
+
+function parseDeleteQuery(line: string): {
+  table: string;
+  whereField?: string;
+  whereSource?: string;
+} | undefined {
+  const match = line.match(
+    /^delete\s+from\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\s+where\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(.+))?$/i,
+  );
+  if (!match) {
+    return undefined;
+  }
+
+  return {
+    table: match[1],
+    whereField: match[2],
+    whereSource: match[3],
+  };
+}
+
+function parseUpdateHeader(header: string): {
+  table: string;
+  whereField?: string;
+  whereSource?: string;
+} | undefined {
+  const match = header.match(
+    /^update\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\s+where\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(.+))?$/i,
+  );
+  if (!match) {
+    return undefined;
+  }
+
+  return {
+    table: match[1],
+    whereField: match[2],
+    whereSource: match[3],
+  };
 }
 
 function parseInlineExpression(
@@ -671,6 +864,7 @@ function looksLikeMalformedTopLevelDsl(line: string): boolean {
     (/^(?:bot|userbot)\s+/.test(line) ||
       /^command\s+/.test(line) ||
       /^on\s+/.test(line) ||
+      /^export\s+(?:func|fn)\s+/.test(line) ||
       /^(?:func|fn)\s+/.test(line) ||
       /^db\s+/.test(line)) &&
     !isTopLevelBlockStart(line)
@@ -688,6 +882,10 @@ function classifyMalformedStatement(line: string): ParserDiagnostic | undefined 
 
   if (/^(elseif|elif)\b/.test(line) && !line.endsWith("{")) {
     return { code: "HPT1015", message: `Malformed DSL statement: ${line.trim()}` };
+  }
+
+  if (/^delete\s+from\b/i.test(line)) {
+    return { code: "HPT1018", message: "Delete statements must include a where clause." };
   }
 
   return undefined;

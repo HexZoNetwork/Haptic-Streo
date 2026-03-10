@@ -7,14 +7,17 @@ export interface IrBot {
 }
 
 export interface IrDb {
+  readonly type: "db";
   readonly name: string;
   readonly fields: readonly DbField[];
 }
 
 export interface IrFunction {
+  readonly type: "function";
   readonly name: string;
   readonly params: readonly string[];
   readonly body: readonly IrStatement[];
+  readonly exported?: boolean;
 }
 
 export type IrStatement =
@@ -46,14 +49,28 @@ export type IrStatement =
       readonly body: readonly IrStatement[];
     }
   | {
+      readonly type: "while";
+      readonly condition: string;
+      readonly body: readonly IrStatement[];
+    }
+  | {
       readonly type: "try";
       readonly catchVar: string;
       readonly tryBody: readonly IrStatement[];
       readonly catchBody: readonly IrStatement[];
     }
+  | { readonly type: "break" }
+  | { readonly type: "continue" }
   | {
       readonly type: "insert";
       readonly table: string;
+      readonly values: Readonly<Record<string, string>>;
+    }
+  | {
+      readonly type: "update";
+      readonly table: string;
+      readonly whereField: string;
+      readonly whereExpression: string;
       readonly values: Readonly<Record<string, string>>;
     }
   | {
@@ -62,7 +79,22 @@ export type IrStatement =
       readonly whereField?: string;
       readonly whereExpression?: string;
       readonly rawQuery: string;
+      readonly resultVariable?: string;
+      readonly declarationKind?: "let" | "const" | "var";
     }
+  | {
+      readonly type: "delete";
+      readonly table: string;
+      readonly whereField: string;
+      readonly whereExpression: string;
+    }
+  | { readonly type: "raw"; readonly source: string };
+
+export type IrTopLevel =
+  | IrDb
+  | IrFunction
+  | IrCommand
+  | IrEvent
   | { readonly type: "raw"; readonly source: string };
 
 export interface IrCommand {
@@ -85,6 +117,7 @@ export interface IrProgram {
   readonly functions: readonly IrFunction[];
   readonly commands: readonly IrCommand[];
   readonly events: readonly IrEvent[];
+  readonly topLevel: readonly IrTopLevel[];
   readonly jsPreamble: readonly string[];
 }
 
@@ -93,6 +126,7 @@ export function buildIr(program: ProgramNode): IrProgram {
   const functions: IrFunction[] = [];
   const commands: IrCommand[] = [];
   const events: IrEvent[] = [];
+  const topLevel: IrTopLevel[] = [];
 
   let bot: IrBot | undefined;
 
@@ -107,36 +141,51 @@ export function buildIr(program: ProgramNode): IrProgram {
     }
 
     if (node.kind === "Db") {
-      databases.push({ name: node.name, fields: node.fields });
+      const db = { type: "db" as const, name: node.name, fields: node.fields };
+      databases.push(db);
+      topLevel.push(db);
       continue;
     }
 
     if (node.kind === "Function") {
-      functions.push({
+      const fn = {
+        type: "function" as const,
         name: node.name,
         params: node.params,
         body: toIrStatements(node.body),
-      });
+        exported: node.exported,
+      };
+      functions.push(fn);
+      topLevel.push(fn);
       continue;
     }
 
     if (node.kind === "Command") {
-      commands.push({
+      const command = {
         type: "command",
         name: node.name,
         body: toIrStatements(node.body),
-      });
+      } as const;
+      commands.push(command);
+      topLevel.push(command);
       continue;
     }
 
     if (node.kind === "Event") {
-      events.push({
+      const event = {
         type: "event",
         eventType: node.eventType,
         command: node.command,
         match: node.match,
         body: toIrStatements(node.body),
-      });
+      } as const;
+      events.push(event);
+      topLevel.push(event);
+      continue;
+    }
+
+    if (node.kind === "RawJS") {
+      topLevel.push({ type: "raw", source: node.source });
     }
   }
 
@@ -146,6 +195,7 @@ export function buildIr(program: ProgramNode): IrProgram {
     functions,
     commands,
     events,
+    topLevel,
     jsPreamble: program.jsPreamble,
   };
 }
@@ -213,6 +263,15 @@ function toIrStatements(body: readonly StatementNode[]): IrStatement[] {
       continue;
     }
 
+    if (statement.kind === "While") {
+      statements.push({
+        type: "while",
+        condition: statement.condition,
+        body: toIrStatements(statement.body),
+      });
+      continue;
+    }
+
     if (statement.kind === "TryCatch") {
       statements.push({
         type: "try",
@@ -223,8 +282,29 @@ function toIrStatements(body: readonly StatementNode[]): IrStatement[] {
       continue;
     }
 
+    if (statement.kind === "Break") {
+      statements.push({ type: "break" });
+      continue;
+    }
+
+    if (statement.kind === "Continue") {
+      statements.push({ type: "continue" });
+      continue;
+    }
+
     if (statement.kind === "Insert") {
       statements.push({ type: "insert", table: statement.table, values: statement.values });
+      continue;
+    }
+
+    if (statement.kind === "Update") {
+      statements.push({
+        type: "update",
+        table: statement.table,
+        whereField: statement.whereField,
+        whereExpression: statement.whereExpression,
+        values: statement.values,
+      });
       continue;
     }
 
@@ -235,6 +315,18 @@ function toIrStatements(body: readonly StatementNode[]): IrStatement[] {
         whereField: statement.whereField,
         whereExpression: statement.whereExpression,
         rawQuery: statement.rawQuery,
+        resultVariable: statement.resultVariable,
+        declarationKind: statement.declarationKind,
+      });
+      continue;
+    }
+
+    if (statement.kind === "Delete") {
+      statements.push({
+        type: "delete",
+        table: statement.table,
+        whereField: statement.whereField,
+        whereExpression: statement.whereExpression,
       });
       continue;
     }

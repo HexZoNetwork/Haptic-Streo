@@ -1,6 +1,9 @@
-﻿import type { BotNode } from "./nodes/BotNode.js";
+import type { BotNode } from "./nodes/BotNode.js";
+import type { BreakNode } from "./nodes/BreakNode.js";
 import type { CommandNode } from "./nodes/CommandNode.js";
 import type { ConditionNode } from "./nodes/ConditionNode.js";
+import type { ContinueNode } from "./nodes/ContinueNode.js";
+import type { DeleteNode } from "./nodes/DeleteNode.js";
 import type { DbField, DbNode } from "./nodes/DbNode.js";
 import type { EventNode } from "./nodes/EventNode.js";
 import type { FunctionNode } from "./nodes/FunctionNode.js";
@@ -17,6 +20,8 @@ import type { SendNode } from "./nodes/SendNode.js";
 import type { StatementNode } from "./nodes/StatementNode.js";
 import type { StopNode } from "./nodes/StopNode.js";
 import type { TryCatchNode } from "./nodes/TryCatchNode.js";
+import type { UpdateNode } from "./nodes/UpdateNode.js";
+import type { WhileNode } from "./nodes/WhileNode.js";
 
 export function createProgramNode(
   body: readonly StatementNode[],
@@ -74,12 +79,21 @@ export function createStopNode(): StopNode {
   return Object.freeze({ kind: "Stop" as const });
 }
 
+export function createBreakNode(): BreakNode {
+  return Object.freeze({ kind: "Break" as const });
+}
+
+export function createContinueNode(): ContinueNode {
+  return Object.freeze({ kind: "Continue" as const });
+}
+
 export function createFunctionNode(
   name: string,
   params: readonly string[],
   body: readonly StatementNode[],
+  exported = false,
 ): FunctionNode {
-  return Object.freeze({ kind: "Function" as const, name, params, body });
+  return Object.freeze({ kind: "Function" as const, name, params, body, exported });
 }
 
 export function createConditionNode(
@@ -96,6 +110,13 @@ export function createLoopNode(
   body: readonly StatementNode[],
 ): LoopNode {
   return Object.freeze({ kind: "Loop" as const, iterator, iterableExpression, body });
+}
+
+export function createWhileNode(
+  condition: string,
+  body: readonly StatementNode[],
+): WhileNode {
+  return Object.freeze({ kind: "While" as const, condition, body });
 }
 
 export function createTryCatchNode(
@@ -119,8 +140,35 @@ export function createSelectNode(
   rawQuery: string,
   whereField?: string,
   whereExpression?: string,
+  resultVariable?: string,
+  declarationKind?: "let" | "const" | "var",
 ): SelectNode {
-  return Object.freeze({ kind: "Select" as const, table, whereField, whereExpression, rawQuery });
+  return Object.freeze({
+    kind: "Select" as const,
+    table,
+    whereField,
+    whereExpression,
+    rawQuery,
+    resultVariable,
+    declarationKind,
+  });
+}
+
+export function createUpdateNode(
+  table: string,
+  whereField: string,
+  whereExpression: string,
+  values: Readonly<Record<string, string>>,
+): UpdateNode {
+  return Object.freeze({ kind: "Update" as const, table, whereField, whereExpression, values });
+}
+
+export function createDeleteNode(
+  table: string,
+  whereField: string,
+  whereExpression: string,
+): DeleteNode {
+  return Object.freeze({ kind: "Delete" as const, table, whereField, whereExpression });
 }
 
 export function createRawJsNode(source: string): RawJsNode {

@@ -13,6 +13,7 @@ export interface CliProjectConfig extends CompilerConfig {
   runtimeMode?: "jit" | "build";
   envFile?: string;
   profile?: string;
+  package?: Record<string, unknown>;
 }
 
 export interface LoadedProjectConfig {
@@ -198,7 +199,7 @@ export async function compileToRuntimeCache(
   try {
     const source = await readTextFile(entryFile);
     const compiler = new HapticCompiler(config);
-    const code = await compiler.compileSource(source);
+    const code = await compiler.compileSource(source, { sourcePath: entryFile });
 
     const codeHash = createHash("sha256").update(entryFile).update("\n").update(code).digest("hex").slice(0, 12);
     const cacheDir = resolveCacheDir(config, cwd);
@@ -206,7 +207,8 @@ export async function compileToRuntimeCache(
     await ensureDir(runtimeDir);
 
     const baseName = path.basename(entryFile, path.extname(entryFile));
-    const runtimeFile = path.join(runtimeDir, `${baseName}-${codeHash}.mjs`);
+    const extension = config.moduleFormat === "cjs" ? ".cjs" : ".mjs";
+    const runtimeFile = path.join(runtimeDir, `${baseName}-${codeHash}${extension}`);
     await writeTextFile(runtimeFile, code);
 
     return { runtimeFile, codeHash };

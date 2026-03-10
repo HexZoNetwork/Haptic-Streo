@@ -6,45 +6,43 @@ import {
   type IrFunction,
   type IrProgram,
   type IrStatement,
+  type IrTopLevel,
 } from "./ir-builder.js";
 import { emitGramJsStatements, emitTelegrafStatements, mapExpression } from "./visitors/command-visitor.js";
 
 export interface GenerateJsOptions {
   readonly engine: "telegraf" | "gramjs";
+  readonly moduleFormat?: "esm" | "cjs";
 }
 
 export function generateJavaScript(program: ProgramNode, options: GenerateJsOptions): string {
   const ir = buildIr(program);
   const runtime = resolveRuntime(ir, options.engine);
+  const moduleFormat = options.moduleFormat ?? "esm";
 
-  return runtime === "gramjs" ? generateGramJs(ir) : generateTelegraf(ir);
+  return runtime === "gramjs" ? generateGramJs(ir, moduleFormat) : generateTelegraf(ir, moduleFormat);
 }
 
-function generateTelegraf(ir: IrProgram): string {
+function generateTelegraf(ir: IrProgram, moduleFormat: "esm" | "cjs"): string {
   const tokenExpr = toEnvAwareExpression(ir.bot?.config.token, "process.env.BOT_TOKEN");
   const lines: string[] = [];
 
-  lines.push('import { Telegraf } from "telegraf";');
+  if (moduleFormat === "cjs") {
+    lines.push('const { Telegraf } = require("telegraf");');
+  } else {
+    lines.push('import { Telegraf } from "telegraf";');
+  }
   lines.push(`const bot = new Telegraf(${tokenExpr});`);
 
   emitDatabaseRuntime(lines, ir);
-  emitJsPreamble(lines, ir);
-  emitSharedFunctions(lines, ir);
   emitTelegrafContextFactory(lines);
-
-  for (const command of ir.commands) {
-    emitTelegrafCommand(lines, command);
-  }
-
-  for (const event of ir.events) {
-    emitTelegrafEvent(lines, event);
-  }
+  emitTelegrafTopLevel(lines, ir.topLevel, moduleFormat);
 
   lines.push("bot.launch();");
   return lines.join("\n").trimEnd() + "\n";
 }
 
-function generateGramJs(ir: IrProgram): string {
+function generateGramJs(ir: IrProgram, moduleFormat: "esm" | "cjs"): string {
   const apiIdExpr = toEnvAwareExpression(ir.bot?.config.api_id ?? ir.bot?.config.apiId, "process.env.API_ID");
   const apiHashExpr = toEnvAwareExpression(
     ir.bot?.config.api_hash ?? ir.bot?.config.apiHash,
@@ -53,9 +51,15 @@ function generateGramJs(ir: IrProgram): string {
 
   const lines: string[] = [];
 
-  lines.push('import { TelegramClient } from "telegram";');
-  lines.push('import { StringSession } from "telegram/sessions/index.js";');
-  lines.push('import { NewMessage } from "telegram/events/NewMessage.js";');
+  if (moduleFormat === "cjs") {
+    lines.push('const { TelegramClient } = require("telegram");');
+    lines.push('const { StringSession } = require("telegram/sessions");');
+    lines.push('const { NewMessage } = require("telegram/events");');
+  } else {
+    lines.push('import { TelegramClient } from "telegram";');
+    lines.push('import { StringSession } from "telegram/sessions";');
+    lines.push('import { NewMessage } from "telegram/events";');
+  }
   lines.push("");
   lines.push(`const apiId = Number(${apiIdExpr});`);
   lines.push(`const apiHash = String(${apiHashExpr});`);
@@ -63,26 +67,21 @@ function generateGramJs(ir: IrProgram): string {
   lines.push("const client = new TelegramClient(stringSession, apiId, apiHash, { connectionRetries: 5 });");
 
   emitDatabaseRuntime(lines, ir);
-  emitJsPreamble(lines, ir);
-  emitSharedFunctions(lines, ir);
   emitGramJsContextFactory(lines);
+  emitGramJsTopLevelPrelude(lines, ir.topLevel, moduleFormat);
 
-  lines.push("await client.start({});");
-  lines.push("client.addEventHandler(async (event) => {");
-  lines.push("  const h = createHapticContext(event, client);");
+  lines.push("async function __hapticMain() {");
+  lines.push("  await client.start({});");
+  lines.push("  client.addEventHandler(async (event) => {");
+  lines.push("    const h = createHapticContext(event, client);");
 
-  for (const command of ir.commands) {
-    lines.push(`  if (${commandRegex(command.name)}.test(h.message.text)) {`);
-    lines.push(...emitGramJsStatements(command.body, "    "));
-    lines.push("  }");
-  }
+  emitGramJsHandlerBody(lines, ir.topLevel);
 
-  for (const event of ir.events) {
-    emitGramJsEvent(lines, event);
-  }
-
-  lines.push("}, new NewMessage({}));");
-  lines.push("await client.runUntilDisconnected();");
+  lines.push("  }, new NewMessage({}));");
+  lines.push("  await client.runUntilDisconnected();");
+  lines.push("}");
+  emitGramJsTopLevelSuffix(lines, ir.topLevel);
+  lines.push('__hapticMain().catch((error) => { console.error(error); process.exitCode = 1; });');
 
   return lines.join("\n").trimEnd() + "\n";
 }
@@ -113,24 +112,45 @@ function emitDatabaseRuntime(lines: string[], ir: IrProgram): void {
   lines.push("  return row;");
   lines.push("}");
   lines.push("");
+  lines.push("async function __hapticDbUpdate(table, whereField, whereValue, patch) {");
+  lines.push("  const rows = __hapticEnsureTable(table);");
+  lines.push("  let updated = 0;");
+  lines.push("  for (const row of rows) {");
+  lines.push("    if (!whereField || row?.[whereField] === whereValue) {");
+  lines.push("      Object.assign(row, patch);");
+  lines.push("      updated += 1;");
+  lines.push("    }");
+  lines.push("  }");
+  lines.push("  return updated;");
+  lines.push("}");
+  lines.push("");
   lines.push("async function __hapticDbSelect(table, whereField, whereValue) {");
   lines.push("  const rows = __hapticEnsureTable(table);");
   lines.push("  if (!whereField) return rows;");
   lines.push("  return rows.filter((row) => row?.[whereField] === whereValue);");
   lines.push("}");
-
-  if (ir.databases.length > 0) {
-    lines.push("");
-    for (const db of ir.databases) {
-      lines.push(`__hapticEnsureTable(${JSON.stringify(db.name)});`);
-      lines.push(`__hapticDbSchema.set(${JSON.stringify(db.name)}, ${JSON.stringify(db.fields)});`);
-    }
-  }
+  lines.push("");
+  lines.push("async function __hapticDbDelete(table, whereField, whereValue) {");
+  lines.push("  const rows = __hapticEnsureTable(table);");
+  lines.push("  let deleted = 0;");
+  lines.push("  for (let i = rows.length - 1; i >= 0; i -= 1) {");
+  lines.push("    if (!whereField || rows[i]?.[whereField] === whereValue) {");
+  lines.push("      rows.splice(i, 1);");
+  lines.push("      deleted += 1;");
+  lines.push("    }");
+  lines.push("  }");
+  lines.push("  return deleted;");
+  lines.push("}");
 }
 
 function hasDbStatement(statements: readonly IrStatement[]): boolean {
   for (const statement of statements) {
-    if (statement.type === "insert" || statement.type === "select") {
+    if (
+      statement.type === "insert" ||
+      statement.type === "update" ||
+      statement.type === "select" ||
+      statement.type === "delete"
+    ) {
       return true;
     }
 
@@ -149,6 +169,13 @@ function hasDbStatement(statements: readonly IrStatement[]): boolean {
       }
     }
 
+    if (statement.type === "while") {
+      const body = statement.body ?? [];
+      if (hasDbStatement(body)) {
+        return true;
+      }
+    }
+
     if (statement.type === "try") {
       const tryBody = statement.tryBody ?? [];
       const catchBody = statement.catchBody ?? [];
@@ -161,23 +188,90 @@ function hasDbStatement(statements: readonly IrStatement[]): boolean {
   return false;
 }
 
-function emitSharedFunctions(lines: string[], ir: IrProgram): void {
-  if (ir.functions.length === 0) {
+function emitFunction(lines: string[], fn: IrFunction, moduleFormat: "esm" | "cjs"): void {
+  const params = fn.params.join(", ");
+  const exportPrefix = moduleFormat === "esm" && fn.exported ? "export " : "";
+  lines.push(`${exportPrefix}async function ${fn.name}(${params}) {`);
+  lines.push(...emitTelegrafStatements(fn.body, "  "));
+  lines.push("}");
+  if (moduleFormat === "cjs" && fn.exported) {
+    lines.push(`exports.${fn.name} = ${fn.name};`);
+  }
+}
+
+function emitDbInitialization(lines: string[], table: string, fields: readonly unknown[]): void {
+  lines.push(`__hapticEnsureTable(${JSON.stringify(table)});`);
+  lines.push(`__hapticDbSchema.set(${JSON.stringify(table)}, ${JSON.stringify(fields)});`);
+}
+
+function emitTelegrafTopLevel(lines: string[], topLevel: readonly IrTopLevel[], moduleFormat: "esm" | "cjs"): void {
+  for (const item of topLevel) {
+    if (item.type === "raw") {
+      lines.push(item.source);
+      continue;
+    }
+
+    if (item.type === "db") {
+      emitDbInitialization(lines, item.name, item.fields);
+      lines.push("");
+      continue;
+    }
+
+    if (item.type === "function") {
+      emitFunction(lines, item, moduleFormat);
+      lines.push("");
+      continue;
+    }
+
+    if (item.type === "command") {
+      emitTelegrafCommand(lines, item);
+      continue;
+    }
+
+    emitTelegrafEvent(lines, item);
+  }
+}
+
+function emitGramJsTopLevelPrelude(lines: string[], topLevel: readonly IrTopLevel[], moduleFormat: "esm" | "cjs"): void {
+  for (const item of topLevel) {
+    if (item.type === "db") {
+      emitDbInitialization(lines, item.name, item.fields);
+      lines.push("");
+      continue;
+    }
+
+    if (item.type === "function") {
+      emitFunction(lines, item, moduleFormat);
+      lines.push("");
+    }
+  }
+}
+
+function emitGramJsHandlerBody(lines: string[], topLevel: readonly IrTopLevel[]): void {
+  for (const item of topLevel) {
+    if (item.type === "command") {
+      lines.push(`  if (${commandRegex(item.name)}.test(h.message.text)) {`);
+      lines.push(...emitGramJsStatements(item.body, "    "));
+      lines.push("  }");
+      continue;
+    }
+
+    if (item.type === "event") {
+      emitGramJsEvent(lines, item);
+    }
+  }
+}
+
+function emitGramJsTopLevelSuffix(lines: string[], topLevel: readonly IrTopLevel[]): void {
+  const rawStatements = topLevel.filter((item): item is Extract<IrTopLevel, { type: "raw" }> => item.type === "raw");
+  if (rawStatements.length === 0) {
     return;
   }
 
   lines.push("");
-  for (const fn of ir.functions) {
-    emitFunction(lines, fn);
-    lines.push("");
+  for (const item of rawStatements) {
+    lines.push(item.source);
   }
-}
-
-function emitFunction(lines: string[], fn: IrFunction): void {
-  const params = fn.params.join(", ");
-  lines.push(`async function ${fn.name}(${params}) {`);
-  lines.push(...emitTelegrafStatements(fn.body, "  "));
-  lines.push("}");
 }
 
 function emitTelegrafContextFactory(lines: string[]): void {
@@ -271,16 +365,6 @@ function emitGramJsEvent(lines: string[], event: IrEvent): void {
   }
 
   lines.push(...emitGramJsStatements(event.body, "  "));
-}
-
-function emitJsPreamble(lines: string[], ir: IrProgram): void {
-  if (ir.jsPreamble.length === 0) {
-    return;
-  }
-
-  lines.push("");
-  lines.push("// JavaScript passthrough");
-  lines.push(...ir.jsPreamble);
 }
 
 function resolveRuntime(ir: IrProgram, fallback: "telegraf" | "gramjs"): "telegraf" | "gramjs" {

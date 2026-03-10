@@ -6,4 +6,5 @@ export interface FunctionNode extends BaseNode {
   readonly name: string;
   readonly params: readonly string[];
   readonly body: readonly StatementNode[];
+  readonly exported?: boolean;
 }

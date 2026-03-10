@@ -183,12 +183,29 @@ function emitStatements(statements: readonly IrStatement[], indent: string): str
       continue;
     }
 
+    if (statement.type === "while") {
+      lines.push(`${indent}while (${mapExpression(statement.condition)}) {`);
+      lines.push(...emitStatements(statement.body, `${indent}  `));
+      lines.push(`${indent}}`);
+      continue;
+    }
+
     if (statement.type === "try") {
       lines.push(`${indent}try {`);
       lines.push(...emitStatements(statement.tryBody, `${indent}  `));
       lines.push(`${indent}} catch (${statement.catchVar}) {`);
       lines.push(...emitStatements(statement.catchBody, `${indent}  `));
       lines.push(`${indent}}`);
+      continue;
+    }
+
+    if (statement.type === "break") {
+      lines.push(`${indent}break;`);
+      continue;
+    }
+
+    if (statement.type === "continue") {
+      lines.push(`${indent}continue;`);
       continue;
     }
 
@@ -200,14 +217,33 @@ function emitStatements(statements: readonly IrStatement[], indent: string): str
       continue;
     }
 
+    if (statement.type === "update") {
+      const entries = Object.entries(statement.values)
+        .map(([key, value]) => `${JSON.stringify(key)}: ${mapExpression(value)}`)
+        .join(", ");
+      lines.push(
+        `${indent}await __hapticDbUpdate(${JSON.stringify(statement.table)}, ${JSON.stringify(statement.whereField)}, ${mapExpression(statement.whereExpression)}, { ${entries} });`,
+      );
+      continue;
+    }
+
     if (statement.type === "select") {
-      if (statement.whereField && statement.whereExpression) {
-        lines.push(
-          `${indent}await __hapticDbSelect(${JSON.stringify(statement.table)}, ${JSON.stringify(statement.whereField)}, ${mapExpression(statement.whereExpression)});`,
-        );
+      const selectCall = statement.whereField && statement.whereExpression
+        ? `await __hapticDbSelect(${JSON.stringify(statement.table)}, ${JSON.stringify(statement.whereField)}, ${mapExpression(statement.whereExpression)})`
+        : `await __hapticDbSelect(${JSON.stringify(statement.table)})`;
+
+      if (statement.resultVariable && statement.declarationKind) {
+        lines.push(`${indent}${statement.declarationKind} ${statement.resultVariable} = ${selectCall};`);
       } else {
-        lines.push(`${indent}await __hapticDbSelect(${JSON.stringify(statement.table)});`);
+        lines.push(`${indent}${selectCall};`);
       }
+      continue;
+    }
+
+    if (statement.type === "delete") {
+      lines.push(
+        `${indent}await __hapticDbDelete(${JSON.stringify(statement.table)}, ${JSON.stringify(statement.whereField)}, ${mapExpression(statement.whereExpression)});`,
+      );
       continue;
     }
 
