@@ -1,6 +1,6 @@
-# Haptic Monorepo
+# Haptic Ohh My God
 
-Haptic adalah DSL Telegram automation yang di-transpile ke JavaScript Node.js.
+Haptic adalah DSL Telegram automation yang di-transpile ke JavaScript Node.js. [support javascript syntax]
 
 ## Docs
 
