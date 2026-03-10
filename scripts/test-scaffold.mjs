@@ -9,6 +9,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const cliBin = path.join(repoRoot, "packages", "haptic-cli", "dist", "cli.js");
 
 await testNewScaffoldCreatesSelfContainedProject();
+await testNewScaffoldRejectsNonEmptyDirectory();
 await testWizardCreatesLocalCliScripts();
 await testInvalidScaffoldInputFailsFast();
 
@@ -37,6 +38,18 @@ async function testWizardCreatesLocalCliScripts() {
   assert.equal(pkg.scripts.dev, "node .haptic/bin/haptic.cjs dev");
   assert.equal(pkg.dependencies.telegraf, "^4.16.3");
   assert.equal(await exists(path.join(tempRoot, ".haptic", "bin", "haptic.cjs")), true);
+}
+
+async function testNewScaffoldRejectsNonEmptyDirectory() {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "haptic-test-new-existing-"));
+  const projectRoot = path.join(tempRoot, "demo");
+  await fs.mkdir(projectRoot, { recursive: true });
+  await fs.writeFile(path.join(projectRoot, "README.md"), "# existing\n");
+
+  await assert.rejects(
+    () => run(process.execPath, [cliBin, "new", "bot", "demo"], { cwd: tempRoot }),
+    /Target directory is not empty/,
+  );
 }
 
 async function testInvalidScaffoldInputFailsFast() {
