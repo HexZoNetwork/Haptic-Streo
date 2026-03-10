@@ -36,7 +36,7 @@ Direct run didukung:
 
 Alternatif tanpa global install:
 
-1. `npm i -D haptic-streo`
+1. `npm i -D https://github.com/HexZoNetwork/Haptic-Streo/releases/download/Haptic/haptic-streo-0.1.0.tgz`
 2. `npx haptic --help`
 
 ## Scaffold Flow
